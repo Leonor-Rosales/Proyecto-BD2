@@ -1,0 +1,36 @@
+name: bd2-maria
+services:
+  hospital:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: hospital_general
+      POSTGRES_PASSWORD: ${HOSPITAL_PASSWORD:?Falta HOSPITAL_PASSWORD en .env}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - hospital_datos:/var/lib/postgresql/data
+      - ./hospital:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "hospital_general"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+  laboratorio:
+    image: mongo@sha256:5d7043a4ffe02b9ed1b6e0bab057546981af5ca0a79107e9c461e49bc44c0a7b
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: maria_admin
+      MONGO_INITDB_ROOT_PASSWORD: ${LAB_PASSWORD:?Falta LAB_PASSWORD en .env}
+      MONGO_INITDB_DATABASE: laboratorio_clinico
+    ports:
+      - "127.0.0.1:57017:27017"
+    volumes:
+      - laboratorio_datos:/data/db
+      - ./laboratorio/001_colecciones.js:/docker-entrypoint-initdb.d/001_colecciones.js:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet -u maria_admin -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'db.adminCommand({ping:1}).ok'"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+volumes:
+  hospital_datos:
+  laboratorio_datos:

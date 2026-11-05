@@ -10,6 +10,9 @@ export function conectar(usuario, clave) {
     return datos;
   }
   return {
+    medicos: () => solicitar('medicos'),
+    consulta: (id, datos) => solicitar('pacientes/' + encodeURIComponent(id) + '/consultas', { method: 'POST', body: JSON.stringify(datos) }),
+    examen: (id, datos) => solicitar('pacientes/' + encodeURIComponent(id) + '/examenes', { method: 'POST', body: JSON.stringify(datos) }),
     sesion: () => solicitar('sesion'),
     historial: id => solicitar('pacientes/' + encodeURIComponent(id) + '/historial'),
     registrar: datos => solicitar('pacientes', { method: 'POST', body: JSON.stringify(datos) })

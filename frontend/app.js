@@ -35,7 +35,7 @@ function navegar() {
         const api = conectar(datos.usuario.trim(), datos.clave);
         const sesion = await api.sesion();
         if (sesion.entidad !== id) throw Error('La cuenta pertenece a otra institución.');
-        if (contenido.isConnected) mostrarPanel(contenido, api);
+        if (contenido.isConnected) mostrarPanel(contenido, api, sesion.entidad);
       });
     }
   }
@@ -53,7 +53,7 @@ function atender(form, accion) {
     finally { boton.disabled = false; }
   });
 }
-function mostrarPanel(contenido, api) {
+function mostrarPanel(contenido, api, entidad) {
   contenido.innerHTML = `<section class="panel"><h2>Consultar expediente</h2>
     <form id="buscar"><label>Identificador del paciente<input name="id" required></label>
     <button>Ver historial</button>${mensaje}</form><div class="resultado" aria-live="polite"></div></section>
@@ -88,6 +88,43 @@ function mostrarPanel(contenido, api) {
         const detalle = valor && typeof valor === 'object' ? (valor.valor !== undefined ? [valor.valor, valor.unidad].join(' ') : JSON.stringify(valor)) : valor;
         agregar('p', campo + ' · ' + detalle);
       }
+    }
+    resultado.insertAdjacentHTML('beforeend', `<details class="panel"><summary>Registrar atención</summary>
+      <form class="consulta">${entidad === 'hospital' ? '<label>Médico<select name="id_personal" required></select></label>' : ''}
+      <label>Motivo<input name="motivo" required></label><label>Notas de evolución<input name="notas"></label>
+      <fieldset><legend>Diagnóstico opcional</legend><label>Código CIE<input name="codigo_cie" maxlength="10"></label>
+      <label>Descripción<input name="descripcion"></label><label>Tipo<select name="tipo"><option>presuntivo</option><option>definitivo</option></select></label></fieldset>
+      <label>Procedimiento opcional<input name="procedimiento"></label>
+      <fieldset><legend>Receta opcional</legend><label>Medicamento<input name="medicamento"></label><label>Dosis<input name="dosis"></label>
+      <label>Frecuencia<input name="frecuencia"></label><label>Duración<input name="duracion"></label></fieldset>
+      <button>Guardar atención</button>${mensaje}</form></details>`);
+    const formulario = resultado.querySelector('.consulta');
+    const actualizar = () => {
+      if (formulario.isConnected) { buscar.elements.id.value = paciente.id; buscar.requestSubmit(); }
+    };
+    atender(formulario, async d => {
+      const datos = { motivo: d.motivo, notas: d.notas, id_personal: d.id_personal };
+      if (d.codigo_cie || d.descripcion) datos.diagnosticos = [{ codigo_cie: d.codigo_cie, descripcion: d.descripcion, tipo: d.tipo }];
+      if (d.procedimiento) datos.tratamientos = [{ nombre_procedimiento: d.procedimiento }];
+      if (d.medicamento || d.dosis || d.frecuencia || d.duracion) datos.recetas = [{ medicamentos: [{
+        medicamento: d.medicamento, dosis: d.dosis, frecuencia: d.frecuencia, duracion: d.duracion
+      }] }];
+      await api.consulta(paciente.id, datos);
+      actualizar();
+    });
+    if (entidad === 'hospital') {
+      for (const medico of await api.medicos()) formulario.elements.id_personal.add(new Option(medico.nombres + ' ' + medico.apellidos, medico.id));
+    } else {
+      resultado.insertAdjacentHTML('beforeend', `<details class="panel"><summary>Registrar examen</summary><form class="examen">
+        <label>Tipo de examen<input name="tipo" required></label>
+        <label>Resultados en JSON<textarea name="resultados" required placeholder='{"color":"amarillo","ph":6}'></textarea></label>
+        <button>Guardar examen</button>${mensaje}</form></details>`);
+      atender(resultado.querySelector('.examen'), async d => {
+        let resultados;
+        try { resultados = JSON.parse(d.resultados); } catch { throw Error('Escribe un objeto JSON válido para los resultados.'); }
+        await api.examen(paciente.id, { tipo: d.tipo, resultados });
+        actualizar();
+      });
     }
   });
   const alta = contenido.querySelector('#alta');

@@ -1,11 +1,12 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { altaHospital, altaLaboratorio, historialHospital, historialLaboratorio } from './repositorios.js';
+import { altaHospital, altaLaboratorio, historialHospital, historialLaboratorio, consultaHospital, consultaLaboratorio, examenLaboratorio, medicosHospital } from './repositorios.js';
+import { leerConsulta, leerExamen } from './atencion.js';
 
 const usuarios = new Map([
-  ['maria.hospital', { clave: process.env.API_HOSPITAL_PASSWORD, historial: historialHospital, alta: altaHospital }],
-  ['maria.laboratorio', { clave: process.env.API_LAB_PASSWORD, historial: historialLaboratorio, alta: altaLaboratorio }]
+  ['maria.hospital', { clave: process.env.API_HOSPITAL_PASSWORD, historial: historialHospital, alta: altaHospital, consulta: consultaHospital, medicos: medicosHospital }],
+  ['maria.laboratorio', { clave: process.env.API_LAB_PASSWORD, historial: historialLaboratorio, alta: altaLaboratorio, consulta: consultaLaboratorio, examen: examenLaboratorio }]
 ]);
 if ([...usuarios.values()].some(usuario => !usuario.clave)) {
   throw new Error('Configura las dos contraseñas de la API en .env antes de iniciar.');
@@ -14,7 +15,7 @@ const hash = valor => createHash('sha256').update(valor).digest();
 const app = express();
 app.disable('x-powered-by');
 app.get('/api/salud', (_req, res) => res.json({ estado: 'activo' }));
-app.use(['/api/pacientes', '/api/sesion'], (req, res, next) => {
+app.use(['/api/pacientes', '/api/sesion', '/api/medicos'], (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   const token = /^Basic ([A-Za-z0-9+/=]+)$/i.exec(req.get('Authorization') || '');
   const credencial = Buffer.from(token?.[1] || '', 'base64').toString();
@@ -29,6 +30,24 @@ app.use(['/api/pacientes', '/api/sesion'], (req, res, next) => {
 });
 app.get('/api/sesion', (_req, res) => res.json({ entidad: res.locals.entidad }));
 app.use(express.static(fileURLToPath(new URL('../frontend/', import.meta.url))));
+app.get('/api/medicos', async (_req, res) => {
+  const { medicos } = res.locals.usuario;
+  if (!medicos) return res.status(403).json({ error: 'Disponible en Hospital.' });
+  res.json(await medicos());
+});
+app.post('/api/pacientes/:id/consultas', express.json({ limit: '32kb' }), async (req, res) => {
+  const datos = leerConsulta(req.body, res.locals.entidad === 'hospital');
+  const id = await res.locals.usuario.consulta(req.params.id, datos);
+  if (!id) return res.status(404).json({ error: 'Paciente no encontrado' });
+  res.status(201).json({ id });
+});
+app.post('/api/pacientes/:id/examenes', express.json({ limit: '32kb' }), async (req, res) => {
+  const { examen } = res.locals.usuario;
+  if (!examen) return res.status(403).json({ error: 'Disponible en Laboratorio.' });
+  const id = await examen(req.params.id, leerExamen(req.body));
+  if (!id) return res.status(404).json({ error: 'Paciente no encontrado' });
+  res.status(201).json({ id });
+});
 app.post('/api/pacientes', express.json({ limit: '16kb' }), async (req, res) => {
   const { nombres, apellidos, fecha_nacimiento } = req.body || {};
   const textoValido = valor => typeof valor === 'string' && valor.trim().length > 0 &&
@@ -52,7 +71,7 @@ app.get('/api/pacientes/:id/historial', async (req, res) => {
 });
 app.use((err, req, res, next) => {
   if (err.status >= 400 && err.status < 500) {
-    return res.status(err.status).json({ error: 'Revisa el cuerpo JSON de la solicitud.' });
+    return res.status(err.status).json({ error: err.status === 422 ? err.message : 'Revisa el cuerpo JSON de la solicitud.' });
   }
   console.error('Error de consulta:', err.name, err.code || '');
   res.status(500).json({ error: 'No se pudo consultar el expediente' });

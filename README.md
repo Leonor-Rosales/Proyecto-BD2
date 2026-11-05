@@ -3,6 +3,8 @@ Proyecto para aprender acerca de las diferentes DB SQL y No SQL
 
 ## Portal institucional local
 
+El [contrato de los endpoints](ENDPOINTS.md) incluye la configuración inicial, las rutas por institución y ejemplos de registro de pacientes, consultas y exámenes.
+
 Desde la raíz del proyecto, con las credenciales de Docker y la API en `.env`, ejecutar:
 
 ```powershell

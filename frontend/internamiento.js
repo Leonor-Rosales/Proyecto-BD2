@@ -1,5 +1,5 @@
 import { mostrarCuenta } from './facturacion.js';
-export async function mostrarInternamiento({secciones,paciente,api,atender,actualizar}) {
+export async function mostrarInternamiento({secciones,paciente,api,atender,actualizar,rol}) {
   const cuerpo=secciones.internamiento;
   const [ingresos,habitaciones]=await Promise.all([api.internamientos(paciente.id),api.habitaciones(paciente.id)]);
   const activo=ingresos.find(h=>h.estado==='internado');
@@ -26,6 +26,28 @@ export async function mostrarInternamiento({secciones,paciente,api,atender,actua
     actualizar();
   });
   if (activo) {
+    const {medicamentos}=await api.catalogoHospital(paciente.id);
+    cuerpo.insertAdjacentHTML('beforeend',`<form class="administrar"><h3>Administrar medicamento</h3>
+      <label>Medicamento<select name="id_medicamento" required></select></label>
+      <label>Cantidad de unidades administradas<input name="cantidad" type="number" min="0.01" step="0.01" required value="1"></label>
+      <output></output><button>Registrar administración y cobrar</button><p class="mensaje" role="status"></p></form>`);
+    const admin=cuerpo.querySelector('.administrar');
+    const conPrecio=medicamentos.filter(m=>m.precio_unitario);
+    for (const m of conPrecio) admin.elements.id_medicamento.add(new Option(m.nombre_generico+' · '+m.presentacion+' · Q'+m.precio_unitario+' / '+m.unidad_medida,m.id));
+    let clave=crypto.randomUUID();
+    function estimar() {
+      const m=conPrecio.find(m=>m.id===admin.elements.id_medicamento.value);
+      admin.querySelector('output').textContent=m?'Importe estimado: Q'+(Number(m.precio_unitario)*Number(admin.elements.cantidad.value)).toFixed(2):'Agrega un medicamento con precio en Catálogos del Hospital.';
+      admin.querySelector('button').disabled=!m;
+    }
+    estimar(); admin.oninput=()=>{clave=crypto.randomUUID();estimar();};
+    atender(admin,async datos=>{
+      const cargo=await api.registrarImporte(paciente.id,activo.id,'administraciones',datos,clave);
+      clave=crypto.randomUUID();
+      admin.querySelector('.mensaje').textContent='Administración registrada. Cargo '+cargo.id+' agregado a la cuenta.';
+      // La cuenta vuelve a consultar los cargos cuando se abre después de administrar.
+      for (const detalle of secciones.cuenta.querySelectorAll('details')) detalle.open=false;
+    });
     cuerpo.insertAdjacentHTML('beforeend','<form class="alta-hospitalaria"><button>Dar alta hospitalaria</button><p class="mensaje" role="status"></p></form>');
     atender(cuerpo.querySelector('.alta-hospitalaria'),async ()=>{
       if (!confirm('¿Cerrar la hospitalización de '+paciente.nombres+', liberar la cama y emitir la factura con los cargos registrados?')) return;
@@ -49,6 +71,6 @@ export async function mostrarInternamiento({secciones,paciente,api,atender,actua
       lista.append(item);
     }
     cuerpo.append(titulo,motivo,lista);
-    mostrarCuenta(secciones.cuenta,paciente,h,api,atender,horario(h.fecha_ingreso),ingresos.length===1);
+    mostrarCuenta(secciones.cuenta,paciente,h,api,atender,horario(h.fecha_ingreso),ingresos.length===1,rol==='administrador');
   }
 }

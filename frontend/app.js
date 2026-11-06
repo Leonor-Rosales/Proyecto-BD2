@@ -2,6 +2,8 @@ import { conectar } from './api.js';
 import { cargarAmbulatorio } from './ambulatorio.js';
 import { mostrarInternamiento } from './internamiento.js';
 import { crearExpediente } from './expediente.js';
+import { mostrarCatalogos } from './catalogos.js';
+import { camposPaciente,mostrarDatos,mostrarSecretaria } from './datos-paciente.js';
 
 const entidades = new Map([
   ['hospital', ['Hospital General', 'Consultas, diagnósticos y tratamientos.', 'M3 21V7h6V3h6v4h6v14H3Zm7 0v-5h4v5M10 9h4m-2-2v4', true]],
@@ -38,7 +40,7 @@ function navegar() {
         const api = conectar(datos.usuario.trim(), datos.clave);
         const sesion = await api.sesion();
         if (sesion.entidad !== id) throw Error('La cuenta pertenece a otra institución.');
-        if (contenido.isConnected) mostrarPanel(contenido, api, sesion.entidad);
+        if (contenido.isConnected) mostrarPanel(contenido, api, sesion.entidad,sesion.rol);
       });
     }
   }
@@ -56,8 +58,9 @@ function atender(form, accion) {
     finally { boton.disabled = false; }
   });
 }
-function mostrarPanel(contenido, api, entidad) {
-  contenido.innerHTML = `<nav class="acciones" aria-label="Área de pacientes"><button data-vista="directorio">Directorio de pacientes</button><button data-vista="registro">+ Registrar paciente</button><a href="#inicio">Cerrar sesión</a></nav>
+function mostrarPanel(contenido, api, entidad,rol) {
+  contenido.innerHTML = `<nav class="acciones" aria-label="Área de pacientes"><button data-vista="directorio">Directorio de pacientes</button><button data-vista="registro">+ Registrar paciente</button>${entidad==='hospital'&&rol==='administrador'?'<button data-vista="catalogos">Catálogos del Hospital</button>':''}<a href="#inicio">Cerrar sesión</a></nav>
+    <section class="panel" id="catalogos" hidden></section>
     <section class="panel" id="directorio"><h2>Directorio de pacientes</h2>
     <form id="filtro"><label>Buscar por nombre, apellidos o ID<input name="termino" type="search" maxlength="150"></label>
     <button>Buscar</button>${mensaje}</form><div id="lista" aria-live="polite"></div></section>
@@ -66,6 +69,7 @@ function mostrarPanel(contenido, api, entidad) {
     <label>Nombres<input name="nombres" required maxlength="100"></label>
     <label>Apellidos<input name="apellidos" required maxlength="100"></label>
     <label>Fecha de nacimiento<input name="fecha_nacimiento" type="date" required></label>
+    ${entidad==='hospital'?camposPaciente:''}
     <button>Abrir expediente</button>${mensaje}</form></section>`;
   const resultado = contenido.querySelector('.resultado');
   const filtro = contenido.querySelector('#filtro');
@@ -82,6 +86,9 @@ function mostrarPanel(contenido, api, entidad) {
     filtro.elements.termino.focus();
   }
   contenido.querySelector('[data-vista="directorio"]').onclick = directorio;
+  if (entidad==='hospital'&&rol==='administrador') contenido.querySelector('[data-vista="catalogos"]').onclick=()=>{
+    cambiar('catalogos'); mostrarCatalogos(contenido.querySelector('#catalogos'),api,atender);
+  };
   contenido.querySelector('#regresar').onclick = directorio;
   contenido.querySelector('[data-vista="registro"]').onclick = () => {
     cambiar('registro');
@@ -117,6 +124,10 @@ function mostrarPanel(contenido, api, entidad) {
     catch (error) { if (actual === version) resultado.append(document.createTextNode(' ' + error.message)); }
   }
   async function dibujar(id, actual, inicial) {
+    if (rol==='secretaria') {
+      await mostrarSecretaria(resultado,id,api,atender,()=>abrir(id));
+      return;
+    }
     const { paciente, consultas, examenes, citas, antecedentes } = await api.historial(id);
     if (actual !== version) return;
     const {secciones,seleccionar}=crearExpediente(resultado,paciente,entidad==='hospital',inicial);
@@ -163,6 +174,7 @@ function mostrarPanel(contenido, api, entidad) {
       <button type="button" data-agregar="farmaco">+ Otro medicamento</button><button>Guardar atención</button>${mensaje}</form>`);
     const formulario = resultado.querySelector('.consulta');
     const actualizar = () => { if (actual === version) abrir(paciente.id,resultado.dataset.seccion); };
+    if (entidad==='hospital') await mostrarDatos(secciones.datos,paciente.id,api,atender,actualizar);
     for (const boton of formulario.querySelectorAll('[data-agregar]')) {
       boton.onclick = () => {
         const copia = formulario.querySelector('.'+boton.dataset.agregar).cloneNode(true);
@@ -188,7 +200,7 @@ function mostrarPanel(contenido, api, entidad) {
     if (entidad === 'hospital') {
       const medicos=await api.medicos();
       if (actual===version) cargarAmbulatorio({secciones,seleccionar,formulario,paciente,citas,antecedentes,medicos,api,atender,actualizar});
-      if (actual===version) await mostrarInternamiento({secciones,paciente,api,atender,actualizar});
+      if (actual===version) await mostrarInternamiento({secciones,paciente,api,atender,actualizar,rol});
     } else {
       secciones.examen.insertAdjacentHTML('beforeend', `<form class="examen">
         <label>Tipo de examen<input name="tipo" required></label>

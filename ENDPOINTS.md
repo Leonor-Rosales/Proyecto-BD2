@@ -174,3 +174,46 @@ Ejemplo de pago:
 ```
 
 Métodos: efectivo, tarjeta o seguro. La referencia es opcional. Usa un UUID nuevo en el encabezado Idempotency-Key para cada cargo o pago y reutiliza esa misma clave al reenviar la misma operación. Un cargo después del alta o un abono mayor que el saldo devuelve 409. Datos inválidos devuelven 422 y un ingreso ajeno al paciente devuelve 404.
+
+## Hospital · habitaciones, medicamentos y administración durante un ingreso
+
+Para un volumen existente ejecuta en PowerShell:
+
+```powershell
+Get-Content -Raw hospital/008_catalogos.sql | docker compose exec -T hospital psql -v ON_ERROR_STOP=1 -U postgres -d hospital_general
+```
+
+El menú **Catálogos del Hospital** permite consultar y crear habitaciones y medicamentos, y actualizar precios por unidad. Las rutas requieren la cuenta del Hospital.
+
+| Método y ruta | Cuerpo |
+|---|---|
+| GET /api/catalogos/habitaciones | Lista de habitaciones con número, unidad, piso, capacidad y estado |
+| POST /api/catalogos/habitaciones | `{"numero":"N-102","tipo_unidad":"normal","piso":"1","capacidad":2}` |
+| GET /api/catalogos/medicamentos | Lista con nombre, presentación, unidad de cobro y precio |
+| POST /api/catalogos/medicamentos | `{"nombre_generico":"Demo","presentacion":"Tableta","unidad_medida":"tableta","precio_unitario":"8.50"}` |
+| PATCH /api/catalogos/medicamentos/:id | `{"precio_unitario":"9.00"}` |
+| POST /api/pacientes/:id/hospitalizaciones/:ingreso/administraciones | `{"id_medicamento":"1","cantidad":"2"}` |
+
+Una administración registrada durante un ingreso activo genera un cargo con el precio vigente, cantidad y fecha. Enviar el mismo Idempotency-Key (UUID) al reintentar evita cobrar dos veces. Una nueva administración usa otra clave. Los medicamentos existentes quedan con precio pendiente hasta que se asigne en el catálogo. Los cambios de precio solo afectan cargos posteriores. Los cargos manuales de medicamentos con precio asignado también utilizan el precio de catálogo.
+
+## Hospital · datos, archivo y roles
+
+Aplica `hospital/009_archivo.sql` a un volumen existente con el mismo procedimiento de las migraciones previas.
+
+| Ruta | Operación |
+|---|---|
+| POST /api/pacientes | Acepta nombres, apellidos, fecha_nacimiento y campos opcionales dpi_cui, genero, direccion, telefono, correo_electronico, contacto_emergencia_nombre y contacto_emergencia_telefono |
+| GET /api/pacientes/:id/datos | Devuelve datos administrativos, estado, motivo y fecha de baja |
+| PATCH /api/pacientes/:id | Actualiza únicamente los campos de paciente enviados |
+| POST /api/pacientes/:id/archivo | Cuerpo `{"motivo":"Traslado"}`. Conserva el historial y cancela las citas pendientes. Rechaza el archivo con 409 si existe hospitalización activa |
+| GET /api/pacientes/:id/citas | Devuelve fechas, estado y médico para gestionar la agenda |
+| GET y POST /api/catalogos/especialidades | Lista especialidades o crea una con nombre y descripción opcional |
+| POST /api/catalogos/medicos | Registra nombres, apellidos, dpi_cui, num_colegiado, rol (medico o especialista), id_especialidad y teléfono/correo opcionales |
+
+La cuenta maria.hospital tiene rol administrador. Para habilitar las cuentas de demostración adicionales, configura API_MEDICO_PASSWORD y API_SECRETARIA_PASSWORD en el archivo local .env antes de arrancar la API. Se usan los usuarios medico.hospital y secretaria.hospital. GET /api/sesion devuelve entidad y rol.
+
+- Administrador gestiona todas las funciones del Hospital.
+- Médico consulta y registra atención, administra medicamentos y gestiona internamientos. Puede consultar catálogos y cuentas. Los cambios de catálogo, cargos manuales, emisión manual de factura y pagos requieren administrador.
+- Secretaria registra y edita pacientes, archiva expedientes y gestiona citas. El servidor rechaza el acceso al historial clínico, antecedentes, consultas y hospitalizaciones.
+
+El formulario de profesionales registra al médico en el catálogo clínico. Las cuentas de acceso se configuran separadamente en .env. Los registros existentes siguen disponibles aunque no tengan datos de contacto.

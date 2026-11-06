@@ -1,0 +1,79 @@
+import express from 'express';
+import { postgres } from './repositorios.js';
+
+const limites = {
+  nombres:100, apellidos:100, dpi_cui:20, genero:20, direccion:255, telefono:20,
+  correo_electronico:150, contacto_emergencia_nombre:150, contacto_emergencia_telefono:20
+};
+export function validarPaciente(datos, parcial=false) {
+  const salida={};
+  if (!datos || typeof datos!=='object' || Array.isArray(datos)) throw Object.assign(new Error('Datos de paciente inválidos.'),{status:422});
+  for (const [campo,maximo] of Object.entries(limites)) {
+    if (parcial && datos[campo]===undefined) continue;
+    const valor=datos[campo];
+    if (valor!=null && typeof valor!=='string') throw Object.assign(new Error('Revisa '+campo+'.'),{status:422});
+    const texto=valor?.trim() || null;
+    if ((['nombres','apellidos'].includes(campo) && !texto) || (texto && (texto.length>maximo || texto.includes('\u0000')))) {
+      throw Object.assign(new Error('Revisa '+campo+'.'),{status:422});
+    }
+    salida[campo]=texto;
+  }
+  if (!parcial || datos.fecha_nacimiento!==undefined) {
+    const valor=datos.fecha_nacimiento;
+    const fecha=typeof valor==='string' && /^\d{4}-\d\d-\d\d$/.test(valor)?new Date(valor+'T00:00:00Z'):new Date(NaN);
+    if (!Number.isFinite(fecha.getTime()) || fecha.getUTCFullYear()<1 || fecha.toISOString().slice(0,10)!==valor || fecha>new Date()) {
+      throw Object.assign(new Error('Fecha de nacimiento inválida.'),{status:422});
+    }
+    salida.fecha_nacimiento=valor;
+  }
+  if (salida.correo_electronico && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(salida.correo_electronico)) throw Object.assign(new Error('Correo electrónico inválido.'),{status:422});
+  return salida;
+}
+export async function datosPaciente(id) {
+  const {rows}=await postgres.query(`SELECT id_paciente::text AS id, nombres,apellidos,dpi_cui,fecha_nacimiento::text,
+    genero,direccion,telefono,correo_electronico,contacto_emergencia_nombre,contacto_emergencia_telefono,
+    estado,motivo_baja,fecha_baja FROM hospital.paciente WHERE id_paciente::text=$1`,[id]);
+  return rows[0];
+}
+export const pacientes=express.Router();
+pacientes.use((req,res,next)=>res.locals.entidad==='hospital'?next():res.status(403).json({error:'Disponible en Hospital.'}));
+pacientes.use(express.json({limit:'16kb'}));
+pacientes.get('/:id/datos',async(req,res)=>{
+  const datos=await datosPaciente(req.params.id);
+  if (!datos) return res.status(404).json({error:'Paciente no encontrado.'});
+  res.json(datos);
+});
+pacientes.get('/:id/citas',async(req,res)=>{
+  const {rows}=await postgres.query(`SELECT c.id_cita::text AS id,c.fecha_hora AS fecha,c.estado_cita AS estado,
+    p.nombres||' '||p.apellidos AS medico FROM hospital.cita_medica c JOIN hospital.personal_medico p USING(id_personal)
+    WHERE c.id_paciente::text=$1 ORDER BY c.fecha_hora DESC`,[req.params.id]);
+  res.json(rows);
+});
+pacientes.patch('/:id',async(req,res)=>{
+  const datos=validarPaciente(req.body,true);
+  const campos=Object.keys(datos);
+  if (!campos.length) return res.status(422).json({error:'Incluye los datos que deseas actualizar.'});
+  const {rows}=await postgres.query(`UPDATE hospital.paciente SET ${campos.map((c,i)=>c+'=$'+(i+2)).join(',')}
+    WHERE id_paciente::text=$1 RETURNING id_paciente::text AS id`,[req.params.id,...Object.values(datos)]);
+  if (!rows.length) return res.status(404).json({error:'Paciente no encontrado.'});
+  res.json(rows[0]);
+});
+pacientes.post('/:id/archivo',async(req,res)=>{
+  const motivo=req.body?.motivo;
+  if (typeof motivo!=='string' || !motivo.trim() || motivo.length>2000 || motivo.includes('\u0000')) return res.status(422).json({error:'Escribe la causa del archivo.'});
+  const db=await postgres.connect();
+  try {
+    await db.query('BEGIN');
+    const {rows:[p]}=await db.query('SELECT estado FROM hospital.paciente WHERE id_paciente::text=$1 FOR UPDATE',[req.params.id]);
+    if (!p) {await db.query('ROLLBACK'); return res.status(404).json({error:'Paciente no encontrado.'});}
+    const ingreso=await db.query(`SELECT 1 FROM hospital.hospitalizacion JOIN hospital.historial_clinico USING(id_historial)
+      WHERE id_paciente::text=$1 AND estado='internado'`,[req.params.id]);
+    if (ingreso.rowCount) {await db.query('ROLLBACK');return res.status(409).json({error:'Da el alta hospitalaria antes de archivar el expediente.'});}
+    if (p.estado!=='baja') {
+      await db.query("UPDATE hospital.paciente SET estado='baja',motivo_baja=$2,fecha_baja=clock_timestamp() WHERE id_paciente::text=$1",[req.params.id,motivo.trim()]);
+      await db.query("UPDATE hospital.cita_medica SET estado_cita='cancelada' WHERE id_paciente::text=$1 AND estado_cita='programada'",[req.params.id]);
+    }
+    await db.query('COMMIT');
+    res.json({estado:'baja'});
+  } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
+});

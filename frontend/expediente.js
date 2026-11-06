@@ -5,7 +5,7 @@ export function crearExpediente(raiz,paciente,hospital,inicial) {
   raiz.querySelector('.ficha h2').textContent=paciente.nombres+' '+paciente.apellidos;
   raiz.querySelector('.identificador').textContent='ID '+paciente.id;
   const opciones=[['historial','Historial clínico'],['atencion','Registrar atención']];
-  if (hospital) opciones.push(['citas','Citas y agenda'],['internamiento','Hospitalización'],['cuenta','Facturación y pagos']);
+  if (hospital) opciones.push(['datos','Datos del paciente'],['citas','Citas y agenda'],['internamiento','Hospitalización'],['cuenta','Facturación y pagos']);
   else opciones.push(['examen','Registrar examen']);
   const secciones={};
   const botones={};

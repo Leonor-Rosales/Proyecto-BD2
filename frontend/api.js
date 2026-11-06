@@ -12,6 +12,11 @@ export function conectar(usuario, clave) {
     return datos;
   }
   return {
+    datosPaciente: id=>solicitar('pacientes/'+encodeURIComponent(id)+'/datos'),
+    citasPaciente: id=>solicitar('pacientes/'+encodeURIComponent(id)+'/citas'),
+    editarPaciente: (id,datos)=>solicitar('pacientes/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(datos)}),
+    archivarPaciente: (id,datos)=>solicitar('pacientes/'+encodeURIComponent(id)+'/archivo',{method:'POST',body:JSON.stringify(datos)}),
+    catalogos: (ruta,metodo='GET',datos) => solicitar('catalogos/'+ruta,{method:metodo,body:datos&&JSON.stringify(datos)}),
     cuenta: (id,ingreso) => solicitar('pacientes/'+encodeURIComponent(id)+'/hospitalizaciones/'+encodeURIComponent(ingreso)+'/cuenta'),
     catalogoHospital: id => solicitar('pacientes/'+encodeURIComponent(id)+'/hospitalizaciones/catalogo'),
     registrarImporte: (id,ingreso,accion,datos,clave) => solicitar('pacientes/'+encodeURIComponent(id)+'/hospitalizaciones/'+encodeURIComponent(ingreso)+'/'+accion,

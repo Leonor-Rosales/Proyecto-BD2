@@ -43,7 +43,18 @@ async function guardarCita(req,res) {
       AND c.id_cita::text=$5 AND c.id_paciente=p.id_paciente AND c.estado_cita='programada' RETURNING c.id_cita AS id`;
   }
   try {
-    const {rows} = await postgres.query(sql,args);
+    const db=await postgres.connect();
+    let rows;
+    try {
+      await db.query('BEGIN');
+      const activo=await db.query("SELECT estado FROM hospital.paciente WHERE id_paciente::text=$1 FOR UPDATE",[req.params.id]);
+      if (activo.rows[0]?.estado!=='activo') {
+        await db.query('ROLLBACK');
+        return invalido(res,'El expediente debe estar activo para agendar.');
+      }
+      rows=(await db.query(sql,args)).rows;
+      await db.query('COMMIT');
+    } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
     if (!rows.length) return invalido(res,'Comprueba el paciente, médico y estado de la cita.');
     res.status(nueva ? 201 : 200).json(rows[0]);
   } catch (error) {

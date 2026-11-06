@@ -6,6 +6,8 @@ import { leerConsulta, leerExamen } from './atencion.js';
 import { buscarHospital, buscarLaboratorio } from './repositorios.js';
 import { ambulatorio } from './ambulatorio.js';
 import { internamiento } from './internamiento.js';
+import { catalogos } from './catalogos.js';
+import { pacientes, validarPaciente } from './pacientes.js';
 
 const usuarios = new Map([
   ['maria.hospital', { clave: process.env.API_HOSPITAL_PASSWORD, historial: historialHospital, alta: altaHospital, consulta: consultaHospital, medicos: medicosHospital }],
@@ -14,11 +16,19 @@ const usuarios = new Map([
 if ([...usuarios.values()].some(usuario => !usuario.clave)) {
   throw new Error('Configura las dos contraseñas de la API en .env antes de iniciar.');
 }
+usuarios.get('maria.hospital').rol='administrador';
+usuarios.get('maria.laboratorio').rol='medico';
+for (const [nombre,rol,variable] of [
+  ['medico.hospital','medico','API_MEDICO_PASSWORD'],
+  ['secretaria.hospital','secretaria','API_SECRETARIA_PASSWORD']
+]) {
+  if (process.env[variable]) usuarios.set(nombre,{...usuarios.get('maria.hospital'),rol,clave:process.env[variable]});
+}
 const hash = valor => createHash('sha256').update(valor).digest();
 const app = express();
 app.disable('x-powered-by');
 app.get('/api/salud', (_req, res) => res.json({ estado: 'activo' }));
-app.use(['/api/pacientes', '/api/sesion', '/api/medicos', '/api/agenda'], (req, res, next) => {
+app.use(['/api/pacientes', '/api/sesion', '/api/medicos', '/api/agenda','/api/catalogos'], (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   const token = /^Basic ([A-Za-z0-9+/=]+)$/i.exec(req.get('Authorization') || '');
   const credencial = Buffer.from(token?.[1] || '', 'base64').toString();
@@ -29,9 +39,19 @@ app.use(['/api/pacientes', '/api/sesion', '/api/medicos', '/api/agenda'], (req, 
   }
   res.locals.usuario = usuario;
   res.locals.entidad = credencial.slice(0, corte).split('.')[1];
+  const rol=usuario.rol;
+  const ruta=req.originalUrl.split('?')[0];
+  if (rol==='secretaria') {
+    const permitida = ruta==='/api/sesion' || ruta==='/api/medicos' || ruta==='/api/agenda' ||
+      ruta==='/api/pacientes' || /^\/api\/pacientes\/[^/]+(?:\/datos|\/archivo|\/citas(?:\/[^/]+(?:\/cancelacion)?)?)?$/.test(ruta);
+    if (!permitida) return res.status(403).json({error:'Tu cuenta de secretaría permite pacientes y agenda.'});
+  }
+  if (rol==='medico' && (ruta.includes('/catalogos') && req.method!=='GET' || /\/(pagos|factura|cargos)$/.test(ruta))) {
+    return res.status(403).json({error:'Esta operación requiere la cuenta administradora.'});
+  }
   next();
 });
-app.get('/api/sesion', (_req, res) => res.json({ entidad: res.locals.entidad }));
+app.get('/api/sesion', (_req, res) => res.json({ entidad: res.locals.entidad,rol:res.locals.usuario.rol }));
 app.get('/api/pacientes', async (req, res) => {
   const termino = req.query.buscar ?? '';
   if (typeof termino !== 'string' || termino.length > 150 || termino.includes('\u0000')) {
@@ -60,6 +80,10 @@ app.post('/api/pacientes/:id/examenes', express.json({ limit: '32kb' }), async (
   res.status(201).json({ id });
 });
 app.post('/api/pacientes', express.json({ limit: '16kb' }), async (req, res) => {
+  if (res.locals.entidad==='hospital') {
+    const id=await res.locals.usuario.alta(validarPaciente(req.body));
+    return res.location('/api/pacientes/'+id+'/historial').status(201).json({id});
+  }
   const { nombres, apellidos, fecha_nacimiento } = req.body || {};
   const textoValido = valor => typeof valor === 'string' && valor.trim().length > 0 &&
     valor.trim().length <= 100 && !valor.includes('\u0000');
@@ -81,8 +105,12 @@ app.get('/api/pacientes/:id/historial', async (req, res) => {
   res.json(expediente);
 });
 app.use('/api/pacientes/:id/hospitalizaciones', internamiento);
+app.use('/api/pacientes',pacientes);
+app.use('/api/catalogos',catalogos);
 app.use('/api', ambulatorio);
 app.use((err, req, res, next) => {
+  if (err.code==='23505') return res.status(409).json({error:'Ya existe un registro con ese DPI, colegiado, correo o nombre.'});
+  if (err.code==='23503') return res.status(422).json({error:'La referencia seleccionada no existe.'});
   if (err.status >= 400 && err.status < 500) {
     return res.status(err.status).json({ error: [404,409,422].includes(err.status) ? err.message : 'Revisa el cuerpo JSON de la solicitud.' });
   }

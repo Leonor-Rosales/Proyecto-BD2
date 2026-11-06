@@ -12,16 +12,17 @@ const mongo = new MongoClient('mongodb://127.0.0.1:57017', {
   authSource: 'admin', serverSelectionTimeoutMS: 5000
 });
 
-export async function altaHospital({ nombres, apellidos, fecha_nacimiento }) {
+export async function altaHospital(datos) {
+  const campos=Object.keys(datos);
   const { rows } = await postgres.query(`
     WITH paciente AS (
-      INSERT INTO hospital.paciente (id_institucion, nombres, apellidos, fecha_nacimiento)
-      VALUES ((SELECT id_institucion FROM hospital.institucion WHERE nombre = $1), $2, $3, $4)
+      INSERT INTO hospital.paciente (id_institucion, ${campos.join(',')})
+      VALUES ((SELECT id_institucion FROM hospital.institucion WHERE nombre = $1), ${campos.map((_,i)=>'$'+(i+2)).join(',')})
       RETURNING id_paciente
     )
     INSERT INTO hospital.historial_clinico (id_paciente)
     SELECT id_paciente FROM paciente RETURNING id_paciente::text AS id`,
-    ['Hospital General de Prueba', nombres, apellidos, fecha_nacimiento]);
+    ['Hospital General de Prueba', ...Object.values(datos)]);
   return rows[0].id;
 }
 
@@ -104,6 +105,7 @@ export async function consultaHospital(id, atencion) {
   const cliente = await postgres.connect();
   try {
     await cliente.query('BEGIN');
+    await cliente.query('SELECT id_paciente FROM hospital.paciente WHERE id_paciente::text=$1 FOR UPDATE',[id]);
     if (atencion.id_cita) {
       const cita = await cliente.query(`UPDATE hospital.cita_medica SET estado_cita='atendida'
         WHERE id_cita::text=$1 AND id_paciente::text=$2 AND id_personal::text=$3 AND estado_cita='programada'`,

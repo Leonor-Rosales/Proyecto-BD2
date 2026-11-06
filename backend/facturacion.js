@@ -1,5 +1,6 @@
 import express from 'express';
 import { postgres } from './repositorios.js';
+import { listarMedicamentos } from './catalogos.js';
 
 const subtotal='round(cantidad * precio_unitario, 2)';
 export async function emitirFactura(db, ingreso) {
@@ -19,15 +20,14 @@ const resumen=`SELECT f.id_factura AS id,f.fecha_emision AS fecha,f.estado_pago 
 
 export const facturacion=express.Router({mergeParams:true});
 facturacion.get('/catalogo',async(req,res)=>{
-  const medicamentos=await postgres.query('SELECT id_medicamento AS id,nombre_generico,presentacion FROM hospital.medicamento ORDER BY nombre_generico');
-  res.json({medicamentos:medicamentos.rows});
+  res.json({medicamentos:await listarMedicamentos()});
 });
 facturacion.get('/:ingreso/cuenta',async(req,res)=>{
   const {rows}=await postgres.query(`SELECT h.id_hospitalizacion AS id,
     (SELECT coalesce(sum(${subtotal}),0)::text FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=h.id_hospitalizacion) AS acumulado,
-    ARRAY(SELECT jsonb_build_object('id',c.id_cargo::text,'tipo',t.nombre_cargo,'descripcion',c.descripcion,'cantidad',cantidad,
-      'medicamento',m.nombre_generico,'profesional',p.nombres||' '||p.apellidos,
-      'precio_unitario',precio_unitario,'subtotal',${subtotal}) FROM hospital.cargo_hospitalizacion c JOIN hospital.tipo_cargo t USING(id_tipo_cargo)
+    ARRAY(SELECT jsonb_build_object('id',c.id_cargo::text,'tipo',t.nombre_cargo,'descripcion',c.descripcion,'cantidad',c.cantidad,
+      'medicamento',m.nombre_generico,'administrado',c.administrado,'fecha',c.fecha_cargo,'profesional',p.nombres||' '||p.apellidos,
+      'precio_unitario',c.precio_unitario,'subtotal',round(c.cantidad*c.precio_unitario,2)) FROM hospital.cargo_hospitalizacion c JOIN hospital.tipo_cargo t USING(id_tipo_cargo)
       LEFT JOIN hospital.medicamento m USING(id_medicamento) LEFT JOIN hospital.personal_medico p USING(id_personal)
       WHERE c.id_hospitalizacion=h.id_hospitalizacion ORDER BY c.id_cargo) AS cargos,
     (SELECT to_jsonb(f) FROM (${resumen.replace('=$1','=h.id_hospitalizacion')}) f) AS factura,
@@ -53,6 +53,7 @@ function registrar(operacion) {
       if (!h) rechazar(404,'Ingreso no encontrado.');
       let salida;
       if (operacion==='cargo') salida=await cobrar(db,h,datos,clave);
+      if (operacion==='administracion') salida=await cobrar(db,h,{...datos,tipo:'medicamento',descripcion:'Administración de medicamento'},clave,true);
       if (operacion==='pago') salida=await pagar(db,h,datos,clave);
       if (operacion==='factura') {
         if (h.estado!=='alta') rechazar(409,'La factura se emite al alta.');
@@ -68,12 +69,18 @@ function registrar(operacion) {
     } finally {db.release();}
   };
 }
-async function cobrar(db,h,d,clave) {
+async function cobrar(db,h,d,clave,administrado=false) {
   if (clave) {
     const previo=await db.query('SELECT id_cargo AS id FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=$1 AND solicitud=$2',[h.id,clave]);
     if (previo.rowCount) return previo.rows[0];
   }
   if (h.estado!=='internado') rechazar(409,'El ingreso ya está cerrado.');
+  if (d.tipo==='medicamento') {
+    const {rows:[med]}=await db.query('SELECT precio_unitario FROM hospital.medicamento WHERE id_medicamento::text=$1 FOR SHARE',[String(d.id_medicamento)]);
+    if (!med) rechazar(422,'Selecciona un medicamento del catálogo.');
+    if (med.precio_unitario) d.precio_unitario=med.precio_unitario;
+    else if (administrado) rechazar(422,'Define primero el precio del medicamento en Catálogos.');
+  }
   if (!positivo(d.cantidad) || !positivo(d.precio_unitario) || typeof d.descripcion!=='string' || !d.descripcion.trim() ||
       d.descripcion.length>255 || d.descripcion.includes('\u0000')) rechazar(422,'Revisa la descripción, la cantidad y el precio.');
   const total=await db.query(`SELECT round($2::numeric*$3::numeric,2) AS importe,
@@ -81,15 +88,15 @@ async function cobrar(db,h,d,clave) {
     FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=$1`,[h.id,d.cantidad,d.precio_unitario]);
   if (!total.rows[0].cabe || Number(total.rows[0].importe)===0) rechazar(422,'El importe está fuera del rango permitido.');
   const {rows}=await db.query(`INSERT INTO hospital.cargo_hospitalizacion
-    (id_hospitalizacion,id_tipo_cargo,id_medicamento,id_personal,descripcion,cantidad,precio_unitario,solicitud)
-    SELECT $1,t.id_tipo_cargo,m.id_medicamento,p.id_personal,$5,$6,$7,$8 FROM hospital.tipo_cargo t
+    (id_hospitalizacion,id_tipo_cargo,id_medicamento,id_personal,descripcion,cantidad,precio_unitario,solicitud,administrado)
+    SELECT $1,t.id_tipo_cargo,m.id_medicamento,p.id_personal,$5,$6,$7,$8,$10 FROM hospital.tipo_cargo t
     LEFT JOIN hospital.medicamento m ON t.nombre_cargo='medicamento' AND m.id_medicamento::text=$3
     LEFT JOIN hospital.personal_medico p ON t.nombre_cargo='honorario_medico' AND p.id_personal::text=$4
       AND p.id_institucion=$9 AND p.estado='activo' AND p.rol IN ('medico','especialista')
     WHERE t.nombre_cargo=$2 AND t.nombre_cargo IN ('servicio','material','medicamento','honorario_medico')
       AND (t.nombre_cargo<>'medicamento' OR m.id_medicamento IS NOT NULL)
       AND (t.nombre_cargo<>'honorario_medico' OR p.id_personal IS NOT NULL) RETURNING id_cargo AS id`,
-    [h.id,d.tipo,d.id_medicamento,d.id_personal,d.descripcion.trim(),d.cantidad,d.precio_unitario,clave,h.id_institucion]);
+    [h.id,d.tipo,d.id_medicamento,d.id_personal,d.descripcion.trim(),d.cantidad,d.precio_unitario,clave,h.id_institucion,administrado]);
   if (!rows.length) rechazar(422,'Revisa el tipo de cargo y el medicamento o profesional seleccionado.');
   return rows[0];
 }
@@ -109,5 +116,6 @@ async function pagar(db,h,d,clave) {
   return rows[0];
 }
 facturacion.post('/:ingreso/cargos',registrar('cargo'));
+facturacion.post('/:ingreso/administraciones',registrar('administracion'));
 facturacion.post('/:ingreso/factura',registrar('factura'));
 facturacion.post('/:ingreso/pagos',registrar('pago'));

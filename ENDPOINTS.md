@@ -24,7 +24,7 @@ La base de las rutas es `http://127.0.0.1:3100/api`. Usa HTTP Basic en cada peti
 |---|---|---|
 | GET /salud | Pública | 200 con `{"estado":"activo"}` |
 | GET /sesion | Ambas | 200 con `{"entidad":"hospital"}` o `{"entidad":"laboratorio"}` |
-| POST /pacientes | Ambas | 201 con `{"id":"…"}` y la URL del historial en el encabezado Location |
+| POST /pacientes | Ambas | 201 con `{"id":"…"}` y Location apuntando a `/datos` para secretaría o a `/historial` para los demás roles |
 | GET /pacientes/:id/historial | Ambas | 200 con `paciente`, `consultas` y `examenes` |
 | GET /medicos | Hospital | 200 con una lista de médicos activos con `id`, `nombres` y `apellidos` |
 | GET /pacientes?buscar=Ana | Ambas | 200 con hasta 25 pacientes por nombre, apellidos o ID. Sin término devuelve los primeros en orden alfabético. Cada fila contiene `id`, `nombres` y `apellidos`. |
@@ -217,3 +217,45 @@ La cuenta maria.hospital tiene rol administrador. Para habilitar las cuentas de 
 - Secretaria registra y edita pacientes, archiva expedientes y gestiona citas. El servidor rechaza el acceso al historial clínico, antecedentes, consultas y hospitalizaciones.
 
 El formulario de profesionales registra al médico en el catálogo clínico. Las cuentas de acceso se configuran separadamente en .env. Los registros existentes siguen disponibles aunque no tengan datos de contacto.
+
+## Laboratorio · datos y archivo del expediente
+
+La primera parte del Laboratorio utiliza las rutas comunes POST /api/pacientes, GET /api/pacientes/:id/datos, PATCH /api/pacientes/:id y POST /api/pacientes/:id/archivo con la cuenta maria.laboratorio. El alta acepta los mismos campos de identificación y contacto que Hospital. El motivo de archivo es obligatorio. Repetir un archivo conserva su motivo y fecha originales.
+
+Los documentos anteriores sin estado se interpretan como activos. Sus datos faltantes aparecen vacíos para que puedan completarse. El archivo conserva consultas y resultados y bloquea nuevas consultas y exámenes con HTTP 409.
+
+### Decisión de modelado para esta versión
+
+Los nuevos exámenes se incorporan al documento del paciente mediante una actualización condicionada a su estado activo. La escritura y la comprobación de estado son atómicas en MongoDB. Los exámenes anteriores permanecen en la colección examenes y el endpoint de historial combina ambos orígenes. Las consultas también se agregan atómicamente al paciente activo.
+
+Este diseño requiere vigilar el crecimiento del documento del paciente. Para historiales de alto volumen, la evolución prevista es conservar todos los exámenes por separado y usar transacciones en un replica set. Esta versión local mantiene compatibilidad con los documentos y colecciones ya creados.
+
+## Laboratorio · tipos de examen
+
+GET /api/tipos-examen devuelve el catálogo de plantillas para la cuenta del Laboratorio. Incluye hematologia, orina y cultivo, con nombre, campos, tipo de dato y unidad. Son plantillas iniciales del proyecto que deben ajustarse al catálogo real del laboratorio.
+
+POST /api/pacientes/:id/examenes admite tipo_id y resultados. El servidor determina el nombre y las unidades a partir de la plantilla y exige todos sus campos. Los valores numéricos deben ser finitos y no negativos. Un campo faltante, adicional o con tipo incorrecto devuelve 422.
+
+```json
+{"tipo_id":"orina","resultados":{"color":"amarillo","aspecto":"claro","ph":6}}
+```
+
+Para estudios personalizados, omite tipo_id y envía tipo con el nombre y resultados como un objeto de parámetros. Cada resultado puede ser un texto, número o un objeto con valor y unidad. La pantalla permite añadir y quitar filas. Los exámenes previos siguen mostrándose con sus campos originales. La fecha de los nuevos exámenes se presenta en hora de Guatemala.
+
+## Laboratorio · permisos por cuenta
+
+GET /api/sesion devuelve entidad `laboratorio` y rol `laboratorista` o `secretaria`. La cuenta existente `maria.laboratorio` conserva sus funciones y utiliza el rol `laboratorista`.
+
+| Usuario | Contraseña configurada en .env | Permisos |
+|---|---|---|
+| maria.laboratorio | API_LAB_PASSWORD | Pacientes, archivo, consultas, resultados y plantillas |
+| laboratorista.laboratorio | API_LABORATORISTA_PASSWORD | Los mismos permisos de María en Laboratorio |
+| secretaria.laboratorio | API_SECRETARIA_LAB_PASSWORD | Buscar, registrar, editar datos administrativos y archivar pacientes |
+
+Las dos cuentas adicionales solo se habilitan cuando su variable contiene una contraseña al iniciar el servidor. Configura contraseñas distintas en tu archivo local `.env` y reinicia con `node --env-file=.env backend/server.js`. No publiques ese archivo ni las contraseñas en Git.
+
+Secretaría puede usar GET /api/sesion, GET y POST /api/pacientes, GET /api/pacientes/:id/datos, PATCH /api/pacientes/:id y POST /api/pacientes/:id/archivo. El endpoint de datos excluye consultas y exámenes. Las demás operaciones devuelven 403 para esa cuenta, incluidas la lectura de historial y la escritura de resultados. La pantalla de secretaría muestra únicamente identificación, contacto y archivo; no carga agenda hospitalaria ni resultados.
+
+Para Josué: consulta el rol al iniciar sesión y utiliza `/datos` para abrir pacientes con secretaría; `/historial` requiere laboratorista. Los permisos se comprueban en el servidor. Las credenciales incorrectas devuelven 401; una operación no autorizada, 403.
+
+Prueba local con API y Docker encendidos: `node --env-file=.env backend/probar-roles-laboratorio.mjs`. Crea un paciente ficticio, verifica el flujo completo (atenciones, cuatro estudios, validaciones, permisos y archivo) y conserva su expediente archivado como evidencia. No modifica pacientes existentes. Consulta el recorrido y los límites de la entrega en [ENTREGA-LABORATORIO.md](ENTREGA-LABORATORIO.md).

@@ -1,6 +1,8 @@
 # Proyecto BD2
 Proyecto para aprender acerca de las diferentes DB SQL y No SQL
 
+La [guía de entrega del Laboratorio](ENTREGA-LABORATORIO.md) contiene el recorrido de demostración, pruebas reproducibles, decisiones de modelado y pendientes de integración del equipo.
+
 ## Portal institucional local
 
 El [contrato de los endpoints](ENDPOINTS.md) incluye la configuración inicial, las rutas por institución y ejemplos de registro de pacientes, consultas y exámenes.

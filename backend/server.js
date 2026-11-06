@@ -8,6 +8,7 @@ import { ambulatorio } from './ambulatorio.js';
 import { internamiento } from './internamiento.js';
 import { catalogos } from './catalogos.js';
 import { pacientes, validarPaciente } from './pacientes.js';
+import { tiposExamen } from './tipos-examen.js';
 
 const usuarios = new Map([
   ['maria.hospital', { clave: process.env.API_HOSPITAL_PASSWORD, historial: historialHospital, alta: altaHospital, consulta: consultaHospital, medicos: medicosHospital }],
@@ -17,18 +18,24 @@ if ([...usuarios.values()].some(usuario => !usuario.clave)) {
   throw new Error('Configura las dos contraseñas de la API en .env antes de iniciar.');
 }
 usuarios.get('maria.hospital').rol='administrador';
-usuarios.get('maria.laboratorio').rol='medico';
+usuarios.get('maria.laboratorio').rol='laboratorista';
 for (const [nombre,rol,variable] of [
   ['medico.hospital','medico','API_MEDICO_PASSWORD'],
   ['secretaria.hospital','secretaria','API_SECRETARIA_PASSWORD']
 ]) {
   if (process.env[variable]) usuarios.set(nombre,{...usuarios.get('maria.hospital'),rol,clave:process.env[variable]});
 }
+for (const [nombre,rol,variable] of [
+  ['laboratorista.laboratorio','laboratorista','API_LABORATORISTA_PASSWORD'],
+  ['secretaria.laboratorio','secretaria','API_SECRETARIA_LAB_PASSWORD']
+]) {
+  if (process.env[variable]) usuarios.set(nombre,{...usuarios.get('maria.laboratorio'),rol,clave:process.env[variable]});
+}
 const hash = valor => createHash('sha256').update(valor).digest();
 const app = express();
 app.disable('x-powered-by');
 app.get('/api/salud', (_req, res) => res.json({ estado: 'activo' }));
-app.use(['/api/pacientes', '/api/sesion', '/api/medicos', '/api/agenda','/api/catalogos'], (req, res, next) => {
+app.use(['/api/pacientes', '/api/sesion', '/api/medicos', '/api/agenda','/api/catalogos','/api/tipos-examen'], (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   const token = /^Basic ([A-Za-z0-9+/=]+)$/i.exec(req.get('Authorization') || '');
   const credencial = Buffer.from(token?.[1] || '', 'base64').toString();
@@ -42,6 +49,15 @@ app.use(['/api/pacientes', '/api/sesion', '/api/medicos', '/api/agenda','/api/ca
   const rol=usuario.rol;
   const ruta=req.originalUrl.split('?')[0];
   if (rol==='secretaria') {
+    if (res.locals.entidad==='laboratorio') {
+      const permitida = req.method==='GET' && ['/api/sesion','/api/pacientes'].includes(ruta) ||
+        req.method==='POST' && ruta==='/api/pacientes' ||
+        req.method==='GET' && /^\/api\/pacientes\/[^/]+\/datos\/?$/i.test(ruta) ||
+        req.method==='PATCH' && /^\/api\/pacientes\/[^/]+\/?$/i.test(ruta) ||
+        req.method==='POST' && /^\/api\/pacientes\/[^/]+\/archivo\/?$/i.test(ruta);
+      if (!permitida) return res.status(403).json({error:'Secretaría del Laboratorio solo permite gestionar datos de pacientes y archivar expedientes.'});
+      return next();
+    }
     const permitida = ruta==='/api/sesion' || ruta==='/api/medicos' || ruta==='/api/agenda' ||
       ruta==='/api/pacientes' || /^\/api\/pacientes\/[^/]+(?:\/datos|\/archivo|\/citas(?:\/[^/]+(?:\/cancelacion)?)?)?$/.test(ruta);
     if (!permitida) return res.status(403).json({error:'Tu cuenta de secretaría permite pacientes y agenda.'});
@@ -52,6 +68,10 @@ app.use(['/api/pacientes', '/api/sesion', '/api/medicos', '/api/agenda','/api/ca
   next();
 });
 app.get('/api/sesion', (_req, res) => res.json({ entidad: res.locals.entidad,rol:res.locals.usuario.rol }));
+app.get('/api/tipos-examen', (_req,res)=>{
+  if (res.locals.entidad!=='laboratorio') return res.status(403).json({error:'Disponible en Laboratorio.'});
+  res.json(tiposExamen);
+});
 app.get('/api/pacientes', async (req, res) => {
   const termino = req.query.buscar ?? '';
   if (typeof termino !== 'string' || termino.length > 150 || termino.includes('\u0000')) {
@@ -80,9 +100,10 @@ app.post('/api/pacientes/:id/examenes', express.json({ limit: '32kb' }), async (
   res.status(201).json({ id });
 });
 app.post('/api/pacientes', express.json({ limit: '16kb' }), async (req, res) => {
-  if (res.locals.entidad==='hospital') {
+  if (['hospital','laboratorio'].includes(res.locals.entidad)) {
     const id=await res.locals.usuario.alta(validarPaciente(req.body));
-    return res.location('/api/pacientes/'+id+'/historial').status(201).json({id});
+    const destino=res.locals.usuario.rol==='secretaria'?'datos':'historial';
+    return res.location('/api/pacientes/'+id+'/'+destino).status(201).json({id});
   }
   const { nombres, apellidos, fecha_nacimiento } = req.body || {};
   const textoValido = valor => typeof valor === 'string' && valor.trim().length > 0 &&

@@ -12,6 +12,7 @@ export function conectar(usuario, clave) {
     return datos;
   }
   return {
+    tiposExamen: ()=>solicitar('tipos-examen'),
     datosPaciente: id=>solicitar('pacientes/'+encodeURIComponent(id)+'/datos'),
     citasPaciente: id=>solicitar('pacientes/'+encodeURIComponent(id)+'/citas'),
     editarPaciente: (id,datos)=>solicitar('pacientes/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(datos)}),

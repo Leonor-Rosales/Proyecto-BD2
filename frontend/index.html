@@ -1,13 +1,31 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Red Clínica · Acceso institucional</title>
-  <link rel="stylesheet" href="/estilos.css"><script type="module" src="/app.js"></script>
+  <link rel="stylesheet" href="/estilos.css">
+  <script>
+    window.addEventListener('error', function(e) {
+      var v = document.getElementById('vista') || document.body;
+      v.innerHTML = '<div style="background:#fee2e2; border:2px solid #ef4444; color:#991b1b; padding:20px; border-radius:10px; margin:20px; font-family:system-ui, sans-serif;">' +
+        '<h2 style="margin-top:0">Aviso del navegador</h2>' +
+        '<p><strong>Detalle:</strong> ' + (e.message || e.error || 'Error desconocido') + '</p>' +
+        '<p>Archivo: ' + (e.filename || '') + ' (línea ' + (e.lineno || '') + ')</p>' +
+        '<p style="color:#666">Prueba presionar <strong>Ctrl + Shift + R</strong> para limpiar la caché del navegador.</p>' +
+        '</div>';
+    });
+  </script>
 </head>
 <body>
-  <header><div class="barra"><a class="marca" href="#inicio"><span class="logo" aria-hidden="true">✚</span> Red Clínica</a><span class="etiqueta">Portal institucional</span></div></header>
+  <header>
+    <div class="barra">
+      <a class="marca" href="#inicio"><span class="logo" aria-hidden="true">✚</span> Red Clínica</a>
+      <span class="etiqueta">Portal institucional</span>
+    </div>
+  </header>
   <main id="vista" tabindex="-1"></main>
   <footer>Red Clínica <span>Plataforma de historiales clínicos</span></footer>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -8,13 +8,14 @@ import { camposPaciente,mostrarDatos,mostrarSecretaria } from './datos-paciente.
 const entidades = new Map([
   ['hospital', ['Hospital General', 'Consultas, diagnósticos y tratamientos.', 'M3 21V7h6V3h6v4h6v14H3Zm7 0v-5h4v5M10 9h4m-2-2v4', true]],
   ['laboratorio', ['Laboratorio Clínico', 'Exámenes de laboratorio y resultados por paciente.', 'M9 3h6m-5 0v7L4 19q-1 2 2 2h12q3 0 2-2l-6-9V3M7 16h10', true]],
-  ['pediatria', ['Centro Médico Pediátrico', 'Crecimiento, vacunación y controles pediátricos.', 'M4 20h16M6 17l4-5 3 2 6-9m-5 0h5v5', false]],
-  ['odontologia', ['Clínica Odontológica', 'Atención dental y seguimiento de procedimientos.', 'M12 5C6 1 2 5 5 12c2 4 1 9 4 9 2 0 1-7 3-7s1 7 3 7c3 0 2-5 4-9 3-7-1-11-7-7Z', false]]
+  ['pediatria', ['Centro Médico Pediátrico', 'Crecimiento, vacunación y controles pediátricos.', 'M4 20h16M6 17l4-5 3 2 6-9m-5 0h5v5', true]],
+  ['odontologia', ['Clínica Odontológica', 'Atención dental y seguimiento de procedimientos.', 'M12 5C6 1 2 5 5 12c2 4 1 9 4 9 2 0 1-7 3-7s1 7 3 7c3 0 2-5 4-9 3-7-1-11-7-7Z', true]]
 ]);
-const vista = document.querySelector('#vista');
+const getVista = () => document.querySelector('#vista') || document.body;
 const enlace = '<a class="volver" href="#inicio">← Cambiar de institución</a>';
 const mensaje = '<p class="mensaje" role="status"></p>';
 function navegar() {
+  const vista = getVista();
   const id = location.hash.slice(1);
   const entidad = entidades.get(id);
   document.title = (entidad?.[0] || 'Acceso institucional') + ' · Red Clínica';
@@ -32,8 +33,11 @@ function navegar() {
     if (!entidad[3]) {
       contenido.innerHTML = '<section class="panel"><h2>Integración pendiente</h2><p>El acceso a los expedientes se habilitará cuando esta institución esté conectada.</p></section>';
     } else {
-      contenido.innerHTML = `<section class="acceso"><aside><span class="kicker">Área de trabajo</span><h2>${id === 'hospital' ? 'Atención hospitalaria' : 'Estudios clínicos'}</h2><p>${id === 'hospital' ? 'Abre un expediente para revisar consultas, registrar diagnósticos y emitir recetas.' : 'Busca al paciente para revisar sus estudios o registrar nuevos resultados.'}</p></aside><div><h2>Iniciar sesión</h2>
-        <form><label>Usuario<input name="usuario" autocomplete="username" required placeholder="maria.${id}"></label>
+      const subArea = id === 'hospital' ? 'Atención hospitalaria' : (id === 'pediatria' ? 'Atención pediátrica' : (id === 'odontologia' ? 'Atención odontológica' : 'Estudios clínicos'));
+      const descArea = id === 'hospital' ? 'Abre un expediente para revisar consultas, registrar diagnósticos y emitir recetas.' : (id === 'pediatria' ? 'Abre un expediente infantil para revisar controles de crecimiento, vacunas y consultas.' : (id === 'odontologia' ? 'Revisa odontogramas, consultas dentales y procedimientos por pieza.' : 'Busca al paciente para revisar sus estudios o registrar nuevos resultados.'));
+      const demoUser = id === 'pediatria' ? 'josue.pediatria' : (id === 'odontologia' ? 'josue.odontologia' : 'maria.' + id);
+      contenido.innerHTML = `<section class="acceso"><aside><span class="kicker">Área de trabajo</span><h2>${subArea}</h2><p>${descArea}</p></aside><div><h2>Iniciar sesión</h2>
+        <form><label>Usuario<input name="usuario" autocomplete="username" required placeholder="${demoUser}"></label>
         <label>Contraseña<input name="clave" type="password" autocomplete="current-password" required></label>
         <button>Entrar al directorio →</button>${mensaje}</form></div></section>`;
       atender(contenido.querySelector('form'), async datos => {
@@ -131,9 +135,9 @@ function mostrarPanel(contenido, api, entidad,rol) {
       await mostrarSecretaria(resultado,id,api,atender,()=>abrir(id),entidad);
       return;
     }
-    const { paciente, consultas, examenes, citas, antecedentes } = await api.historial(id);
+    const { paciente, consultas, examenes, citas, antecedentes, controles_crecimiento, vacunas, odontograma, cobros } = await api.historial(id);
     if (actual !== version) return;
-    const {secciones,seleccionar}=crearExpediente(resultado,paciente,entidad==='hospital',inicial);
+    const {secciones,seleccionar}=crearExpediente(resultado,paciente,entidad,inicial);
     const historialAtenciones=secciones.consultas||secciones.historial;
     let destino=historialAtenciones;
     const agregar = (tag, texto) => {
@@ -141,6 +145,12 @@ function mostrarPanel(contenido, api, entidad,rol) {
       elemento.textContent = texto;
       destino.append(elemento);
     };
+    if (paciente.estado === 'baja') {
+      const avisoBaja = document.createElement('div');
+      avisoBaja.style.cssText = 'background:#fee2e2; border:1px solid #ef4444; color:#991b1b; padding:10px 14px; border-radius:6px; margin-bottom:14px; font-weight:500;';
+      avisoBaja.textContent = 'Expediente archivado (Baja): ' + (paciente.motivo_baja || 'Baja administrativa');
+      secciones.historial.append(avisoBaja);
+    }
     agregar('h3', 'Consultas (' + consultas.length + ')');
     if (!consultas.length) agregar('p', 'Sin consultas registradas.');
     for (const c of consultas) {
@@ -149,11 +159,54 @@ function mostrarPanel(contenido, api, entidad,rol) {
       if (c.notas) agregar('p', c.notas);
       if (c.id_cita) agregar('p', 'Cita de origen · ' + c.id_cita);
       for (const [nombre, valor] of Object.entries(c.signos_vitales || {})) agregar('p', nombre + ' · ' + (typeof valor === 'object' ? JSON.stringify(valor) : valor));
-      for (const d of c.diagnosticos) agregar('p', 'Diagnóstico · ' + d.descripcion);
-      for (const t of c.tratamientos) agregar('p', 'Tratamiento · ' + t.nombre_procedimiento);
-      for (const r of c.recetas) for (const m of r.medicamentos) agregar('p', [m.medicamento, m.dosis, m.frecuencia, m.duracion].join(' · '));
+      for (const d of c.diagnosticos || []) agregar('p', 'Diagnóstico · ' + d.descripcion);
+      for (const t of c.tratamientos || []) agregar('p', 'Tratamiento · ' + t.nombre_procedimiento + (t.pieza ? ' (Pieza ' + t.pieza + ')' : ''));
+      for (const r of c.recetas || []) for (const m of r.medicamentos || []) agregar('p', [m.medicamento, m.dosis, m.frecuencia, m.duracion].join(' · '));
     }
     destino=secciones.historial;
+    if (entidad === 'odontologia' && odontograma?.length) {
+      agregar('h3', 'Odontograma Clínico (32 piezas dentales fijas)');
+      destino = document.createElement('article'); destino.className = 'registro-clinico'; secciones.historial.append(destino);
+      const colores = { sano: '#10b981', caries: '#ef4444', obturado: '#3b82f6', ausente: '#6b7280', corona: '#f59e0b', endodoncia: '#8b5cf6' };
+      destino.innerHTML = `
+        <div style="display:grid; grid-template-columns:repeat(8, 1fr); gap:6px; margin:10px 0; font-size:12px; text-align:center;">
+          ${odontograma.map(p => `
+            <div style="border:1px solid #ddd; padding:4px; border-radius:4px; background:${colores[p.estado] || '#eee'}18; border-color:${colores[p.estado] || '#ccc'};">
+              <strong>${p.numero}</strong><br>
+              <span style="font-weight:600; color:${colores[p.estado] || '#333'}">${p.estado}</span>
+              ${p.observaciones ? `<br><small style="color:#666">${p.observaciones}</small>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+      if (cobros?.length) {
+        destino = secciones.historial;
+        agregar('h3', 'Historial de Cobros (' + cobros.length + ')');
+        for (const cob of cobros) {
+          destino = document.createElement('article'); destino.className = 'registro-clinico'; secciones.historial.append(destino);
+          agregar('h4', 'Cobro · Q ' + Number(cob.monto).toFixed(2) + ' · ' + (cob.metodo_pago || 'efectivo') + ' · ' + (cob.estado_pago || 'pagado'));
+          if (cob.fecha) agregar('p', 'Fecha: ' + new Date(cob.fecha).toLocaleDateString('es-GT', { timeZone: 'America/Guatemala' }));
+        }
+      }
+    }
+    if (entidad === 'pediatria') {
+      if (controles_crecimiento?.length) {
+        agregar('h3', 'Controles de crecimiento (' + controles_crecimiento.length + ')');
+        for (const c of controles_crecimiento) {
+          destino = document.createElement('article'); destino.className = 'registro-clinico'; secciones.historial.append(destino);
+          agregar('h4', 'Control · ' + c.fecha);
+          agregar('p', `Peso: ${c.peso_kg} kg · Talla: ${c.talla_cm} cm` + (c.perimetro_cefalico_cm ? ` · P. Cefálico: ${c.perimetro_cefalico_cm} cm` : '') + (c.percentil_observado ? ` · Percentil: ${c.percentil_observado}` : ''));
+        }
+      }
+      if (vacunas?.length) {
+        agregar('h3', 'Esquema de vacunación (' + vacunas.length + ')');
+        for (const v of vacunas) {
+          destino = document.createElement('article'); destino.className = 'registro-clinico'; secciones.historial.append(destino);
+          agregar('h4', `${v.nombre_vacuna} (${v.numero_dosis}) · Estado: ${v.estado}`);
+          agregar('p', `Programada: ${v.fecha_programada}` + (v.fecha_aplicacion ? ` · Aplicada: ${v.fecha_aplicacion}` : '') + (v.lote ? ` · Lote: ${v.lote}` : ''));
+        }
+      }
+    }
     if (entidad === 'laboratorio') agregar('h3', 'Exámenes (' + examenes.length + ')');
     if (entidad === 'laboratorio' && !examenes.length) agregar('p','Este paciente todavía no tiene resultados. Usa Registrar examen para añadir su primer estudio.');
     for (const e of examenes) {
@@ -165,9 +218,37 @@ function mostrarPanel(contenido, api, entidad,rol) {
         agregar('p', campo + ' · ' + detalle);
       }
     }
+    if (paciente.estado !== 'baja') {
+      const detalleArchivo = document.createElement('details');
+      detalleArchivo.style.marginTop = '24px';
+      detalleArchivo.style.borderTop = '1px solid #e5e7eb';
+      detalleArchivo.style.paddingTop = '12px';
+      detalleArchivo.innerHTML = `<summary style="cursor:pointer; color:#6b7280; font-size:13px; user-select:none;">Archivar o dar de baja este expediente clínico</summary>
+        <form class="archivo-expediente" style="margin-top:10px;">
+          <label>Causa o motivo de baja (traslado, fallecimiento, administrativo...)<textarea name="motivo" maxlength="2000" required placeholder="Escribe el motivo del archivo..."></textarea></label>
+          <button style="background:#dc2626; color:white; border:none; padding:8px 14px; border-radius:4px; margin-top:6px; cursor:pointer;">Confirmar baja de expediente</button>
+          <p class="mensaje" role="status"></p>
+        </form>`;
+      secciones.historial.append(detalleArchivo);
+      atender(detalleArchivo.querySelector('form'), async d => {
+        if (!confirm('¿Confirmas que deseas dar de baja y archivar este expediente clínico?')) return;
+        await api.archivarPaciente(paciente.id, d);
+        actualizar();
+      });
+    }
     secciones.atencion.insertAdjacentHTML('beforeend', `
-      <form class="consulta">${entidad === 'hospital' ? '<label>Médico<select name="id_personal" required></select></label>' : ''}
+      <form class="consulta">${['hospital', 'pediatria', 'odontologia'].includes(entidad) ? `<label>${entidad === 'pediatria' ? 'Pediatra' : (entidad === 'odontologia' ? 'Odontólogo' : 'Médico')}<select name="id_personal" required></select></label>` : ''}
+      ${entidad === 'pediatria' ? '<label>Tipo de consulta<select name="tipo_consulta"><option value="control_nino_sano">Control de niño sano</option><option value="enfermedad">Enfermedad</option><option value="urgencia">Urgencia</option></select></label>' : ''}
       <label>Motivo<input name="motivo" required></label><label>Notas de evolución<input name="notas"></label>
+      ${entidad === 'odontologia' ? `<fieldset><legend>Procedimiento y odontograma</legend>
+        <label>Pieza dental (FDI: 11 a 48)<input name="pieza" type="number" min="11" max="48" placeholder="Ej. 18, 25, 46"></label>
+        <label>Nuevo estado dental<select name="nuevo_estado"><option value="obturado">Obturado (Resina/Amalgama)</option><option value="caries">Caries activa</option><option value="endodoncia">Tratamiento de canales</option><option value="corona">Corona protésica</option><option value="ausente">Pieza extraída</option><option value="sano">Sano</option></select></label>
+      </fieldset>` : ''}
+      ${entidad === 'pediatria' ? `<fieldset><legend>Control de crecimiento (opcional)</legend>
+        <label>Peso (kg)<input name="peso_kg" type="number" step="0.01"></label>
+        <label>Talla (cm)<input name="talla_cm" type="number" step="0.1"></label>
+        <label>Perímetro cefálico (cm)<input name="perimetro_cefalico_cm" type="number" step="0.1"></label>
+        <label>Percentil observado<input name="percentil_observado" placeholder="Ej. P50 (OMS)"></label></fieldset>` : ''}
       <fieldset><legend>Signos vitales opcionales</legend><label>Presión arterial (mmHg)<input name="presion" placeholder="120/80"></label>
       <label>Temperatura (°C)<input name="temperatura" type="number" step="0.1"></label><label>Frecuencia cardíaca (lpm)<input name="pulso" type="number" min="0"></label>
       <label>Frecuencia respiratoria (rpm)<input name="respiracion" type="number" min="0"></label><label>Saturación O₂ (%)<input name="saturacion" type="number" min="0" max="100"></label></fieldset>
@@ -197,22 +278,46 @@ function mostrarPanel(contenido, api, entidad,rol) {
     atender(formulario, async d => {
       const datos = { motivo: d.motivo, notas: d.notas, id_personal: formulario.elements.id_personal?.value };
       if (d.id_cita) datos.id_cita=d.id_cita;
+      if (entidad === 'pediatria') {
+        if (d.tipo_consulta) datos.tipo_consulta = d.tipo_consulta;
+        if (d.peso_kg && d.talla_cm) {
+          datos.control_crecimiento = {
+            peso_kg: Number(d.peso_kg),
+            talla_cm: Number(d.talla_cm),
+            perimetro_cefalico_cm: d.perimetro_cefalico_cm ? Number(d.perimetro_cefalico_cm) : null,
+            percentil_observado: d.percentil_observado || null
+          };
+        }
+      }
       const signos = Object.fromEntries(['presion','temperatura','pulso','respiracion','saturacion'].filter(k=>d[k]).map(k=>[k,k==='presion'?d[k]:Number(d[k])]));
       if (Object.keys(signos).length) datos.signos_vitales=signos;
       const filas = selector => Array.from(formulario.querySelectorAll(selector), fila =>
         Object.fromEntries(Array.from(fila.querySelectorAll('input,select'), campo => [campo.name,campo.value.trim()])));
       datos.diagnosticos=filas('.diagnostico').filter(f=>f.codigo_cie || f.descripcion);
       datos.tratamientos=filas('.tratamiento').filter(f=>f.procedimiento).map(f=>({nombre_procedimiento:f.procedimiento}));
+      if (entidad === 'odontologia' && d.pieza) {
+        datos.tratamientos.push({
+          nombre_procedimiento: d.procedimiento || ('Procedimiento dental en pieza ' + d.pieza),
+          pieza: Number(d.pieza),
+          nuevo_estado: d.nuevo_estado || 'obturado'
+        });
+      }
       const medicamentos=filas('.farmaco').filter(f=>Object.values(f).some(Boolean));
       if (medicamentos.length) datos.recetas=[{medicamentos}];
       await api.consulta(paciente.id, datos);
       actualizar();
     });
-    if (entidad === 'hospital') {
-      const medicos=await api.medicos();
-      if (actual===version) cargarAmbulatorio({secciones,seleccionar,formulario,paciente,citas,antecedentes,medicos,api,atender,actualizar});
-      if (actual===version) await mostrarInternamiento({secciones,paciente,api,atender,actualizar,rol});
-    } else {
+    if (['hospital', 'pediatria', 'odontologia'].includes(entidad)) {
+      const medicos = await api.medicos();
+      const select = formulario.querySelector('select[name="id_personal"]');
+      if (select) {
+        select.innerHTML = medicos.map(m => `<option value="${m.id}">${m.nombres} ${m.apellidos} (${m.especialidad || 'General'})</option>`).join('');
+      }
+      if (entidad === 'hospital') {
+        if (actual===version) cargarAmbulatorio({secciones,seleccionar,formulario,paciente,citas,antecedentes,medicos,api,atender,actualizar});
+        if (actual===version) await mostrarInternamiento({secciones,paciente,api,atender,actualizar,rol});
+      }
+    } else if (entidad === 'laboratorio') {
       secciones.examen.insertAdjacentHTML('beforeend', `<form class="examen">
         <label>Estudio<select name="tipo_id"></select></label>
         <label>Nombre del estudio personalizado<input name="tipo" required maxlength="150"></label>
@@ -275,4 +380,8 @@ function mostrarPanel(contenido, api, entidad,rol) {
   directorio();
 }
 window.addEventListener('hashchange', navegar);
-navegar();
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', navegar);
+} else {
+  navegar();
+}

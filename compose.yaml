@@ -31,6 +31,32 @@ services:
       interval: 5s
       timeout: 10s
       retries: 24
+  pediatria:
+    image: mysql:8.0
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    environment:
+      MYSQL_DATABASE: centro_pediatrico
+      MYSQL_ROOT_PASSWORD: ${PEDIATRIA_ROOT_PASSWORD:?Falta PEDIATRIA_ROOT_PASSWORD en .env}
+      MYSQL_USER: josue_pediatra
+      MYSQL_PASSWORD: ${PEDIATRIA_PASSWORD:?Falta PEDIATRIA_PASSWORD en .env}
+    ports:
+      - "127.0.0.1:33060:3306"
+    volumes:
+      - pediatria_datos:/var/lib/mysql
+      - ./pediatria:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+  odontologia:
+    image: ridedott/firestore-emulator:latest
+    environment:
+      FIRESTORE_PROJECT_ID: clinica-odontologica
+      PORT: 8080
+    ports:
+      - "127.0.0.1:8080:8080"
 volumes:
   hospital_datos:
   laboratorio_datos:
+  pediatria_datos:

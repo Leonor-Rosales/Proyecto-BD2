@@ -43,6 +43,20 @@ export function leerConsulta(body, hospital) {
       return { medicamentos };
     })
   };
+  if (datos.tipo_consulta && ['control_nino_sano', 'enfermedad', 'urgencia'].includes(datos.tipo_consulta)) {
+    consulta.tipo_consulta = datos.tipo_consulta;
+  }
+  if (datos.control_crecimiento && typeof datos.control_crecimiento === 'object') {
+    const cc = datos.control_crecimiento;
+    if (cc.peso_kg != null && cc.talla_cm != null) {
+      consulta.control_crecimiento = {
+        peso_kg: Number(cc.peso_kg),
+        talla_cm: Number(cc.talla_cm),
+        perimetro_cefalico_cm: cc.perimetro_cefalico_cm != null ? Number(cc.perimetro_cefalico_cm) : null,
+        percentil_observado: cc.percentil_observado ? texto(String(cc.percentil_observado), 'percentil_observado', 50) : null
+      };
+    }
+  }
   if (hospital) consulta.id_personal = texto(String(datos.id_personal ?? ''), 'id_personal', 19);
   if (hospital && datos.id_cita != null) consulta.id_cita = texto(String(datos.id_cita), 'id_cita', 19);
   return consulta;

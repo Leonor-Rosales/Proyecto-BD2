@@ -1,9 +1,16 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { altaHospital, altaLaboratorio, historialHospital, historialLaboratorio, consultaHospital, consultaLaboratorio, examenLaboratorio, medicosHospital } from './repositorios.js';
+import {
+  altaHospital, altaLaboratorio, altaPediatria, altaOdontologia,
+  historialHospital, historialLaboratorio, historialPediatria, historialOdontologia,
+  consultaHospital, consultaLaboratorio, consultaPediatria, consultaOdontologia,
+  examenLaboratorio, medicosHospital, medicosPediatria, medicosOdontologia,
+  buscarHospital, buscarLaboratorio, buscarPediatria, buscarOdontologia,
+  archivarHospital, archivarPediatria, archivarLaboratorio, archivarOdontologia,
+  inicializarOdontologia
+} from './repositorios.js';
 import { leerConsulta, leerExamen } from './atencion.js';
-import { buscarHospital, buscarLaboratorio } from './repositorios.js';
 import { ambulatorio } from './ambulatorio.js';
 import { internamiento } from './internamiento.js';
 import { catalogos } from './catalogos.js';
@@ -11,10 +18,61 @@ import { pacientes, validarPaciente } from './pacientes.js';
 import { tiposExamen } from './tipos-examen.js';
 
 const usuarios = new Map([
-  ['maria.hospital', { clave: process.env.API_HOSPITAL_PASSWORD, historial: historialHospital, alta: altaHospital, consulta: consultaHospital, medicos: medicosHospital }],
-  ['maria.laboratorio', { clave: process.env.API_LAB_PASSWORD, historial: historialLaboratorio, alta: altaLaboratorio, consulta: consultaLaboratorio, examen: examenLaboratorio }]
+  ['maria.hospital', { clave: process.env.API_HOSPITAL_PASSWORD, historial: historialHospital, alta: altaHospital, consulta: consultaHospital, medicos: medicosHospital, buscar: buscarHospital, archivar: archivarHospital, rol: 'administrador' }],
+  ['maria.laboratorio', { clave: process.env.API_LAB_PASSWORD, historial: historialLaboratorio, alta: altaLaboratorio, consulta: consultaLaboratorio, examen: examenLaboratorio, buscar: buscarLaboratorio, archivar: archivarLaboratorio, rol: 'medico' }]
 ]);
-if ([...usuarios.values()].some(usuario => !usuario.clave)) {
+
+if (process.env.API_PEDIATRIA_PASSWORD) {
+  usuarios.set('josue.pediatria', {
+    clave: process.env.API_PEDIATRIA_PASSWORD,
+    historial: historialPediatria,
+    alta: altaPediatria,
+    consulta: consultaPediatria,
+    medicos: medicosPediatria,
+    buscar: buscarPediatria,
+    archivar: archivarPediatria,
+    rol: 'administrador'
+  });
+}
+if (process.env.API_PEDIATRIA_SECRETARIA_PASSWORD) {
+  usuarios.set('secretaria.pediatria', {
+    clave: process.env.API_PEDIATRIA_SECRETARIA_PASSWORD,
+    historial: historialPediatria,
+    alta: altaPediatria,
+    consulta: consultaPediatria,
+    medicos: medicosPediatria,
+    buscar: buscarPediatria,
+    archivar: archivarPediatria,
+    rol: 'secretaria'
+  });
+}
+
+if (process.env.API_ODONTOLOGIA_PASSWORD) {
+  usuarios.set('josue.odontologia', {
+    clave: process.env.API_ODONTOLOGIA_PASSWORD,
+    historial: historialOdontologia,
+    alta: altaOdontologia,
+    consulta: consultaOdontologia,
+    medicos: medicosOdontologia,
+    buscar: buscarOdontologia,
+    archivar: archivarOdontologia,
+    rol: 'administrador'
+  });
+}
+if (process.env.API_ODONTOLOGIA_SECRETARIA_PASSWORD) {
+  usuarios.set('secretaria.odontologia', {
+    clave: process.env.API_ODONTOLOGIA_SECRETARIA_PASSWORD,
+    historial: historialOdontologia,
+    alta: altaOdontologia,
+    consulta: consultaOdontologia,
+    medicos: medicosOdontologia,
+    buscar: buscarOdontologia,
+    archivar: archivarOdontologia,
+    rol: 'secretaria'
+  });
+}
+
+if (!process.env.API_HOSPITAL_PASSWORD || !process.env.API_LAB_PASSWORD) {
   throw new Error('Configura las dos contraseñas de la API en .env antes de iniciar.');
 }
 usuarios.get('maria.hospital').rol='administrador';
@@ -77,17 +135,17 @@ app.get('/api/pacientes', async (req, res) => {
   if (typeof termino !== 'string' || termino.length > 150 || termino.includes('\u0000')) {
     return res.status(400).json({ error: 'Ingresa un nombre o identificador válido.' });
   }
-  const buscar = res.locals.entidad === 'hospital' ? buscarHospital : buscarLaboratorio;
+  const buscar = res.locals.usuario.buscar || (res.locals.entidad === 'hospital' ? buscarHospital : buscarLaboratorio);
   res.json(await buscar(termino.trim()));
 });
 app.use(express.static(fileURLToPath(new URL('../frontend/', import.meta.url))));
 app.get('/api/medicos', async (_req, res) => {
   const { medicos } = res.locals.usuario;
-  if (!medicos) return res.status(403).json({ error: 'Disponible en Hospital.' });
+  if (!medicos) return res.status(403).json({ error: 'Disponible en Hospital, Pediatría y Odontología.' });
   res.json(await medicos());
 });
 app.post('/api/pacientes/:id/consultas', express.json({ limit: '32kb' }), async (req, res) => {
-  const datos = leerConsulta(req.body, res.locals.entidad === 'hospital');
+  const datos = leerConsulta(req.body, ['hospital', 'pediatria', 'odontologia'].includes(res.locals.entidad));
   const id = await res.locals.usuario.consulta(req.params.id, datos);
   if (!id) return res.status(404).json({ error: 'Paciente no encontrado' });
   res.status(201).json({ id });
@@ -100,10 +158,10 @@ app.post('/api/pacientes/:id/examenes', express.json({ limit: '32kb' }), async (
   res.status(201).json({ id });
 });
 app.post('/api/pacientes', express.json({ limit: '16kb' }), async (req, res) => {
-  if (['hospital','laboratorio'].includes(res.locals.entidad)) {
-    const id=await res.locals.usuario.alta(validarPaciente(req.body));
-    const destino=res.locals.usuario.rol==='secretaria'?'datos':'historial';
-    return res.location('/api/pacientes/'+id+'/'+destino).status(201).json({id});
+  if (['hospital', 'laboratorio', 'pediatria', 'odontologia'].includes(res.locals.entidad)) {
+    const id = await res.locals.usuario.alta(validarPaciente(req.body));
+    const destino = res.locals.usuario.rol === 'secretaria' ? 'datos' : 'historial';
+    return res.location('/api/pacientes/' + id + '/' + destino).status(201).json({ id });
   }
   const { nombres, apellidos, fecha_nacimiento } = req.body || {};
   const textoValido = valor => typeof valor === 'string' && valor.trim().length > 0 &&
@@ -120,22 +178,38 @@ app.post('/api/pacientes', express.json({ limit: '16kb' }), async (req, res) => 
   const id = await res.locals.usuario.alta({ nombres: nombres.trim(), apellidos: apellidos.trim(), fecha_nacimiento });
   res.location('/api/pacientes/' + id + '/historial').status(201).json({ id });
 });
+app.post('/api/pacientes/:id/archivo', express.json({ limit: '16kb' }), async (req, res) => {
+  const motivo = req.body?.motivo;
+  if (typeof motivo !== 'string' || !motivo.trim() || motivo.length > 2000 || motivo.includes('\u0000')) {
+    return res.status(422).json({ error: 'Escribe la causa del archivo.' });
+  }
+  const { archivar } = res.locals.usuario;
+  if (!archivar) return res.status(403).json({ error: 'Operación no soportada para esta entidad.' });
+  const resultado = await archivar(req.params.id, motivo);
+  if (!resultado) return res.status(404).json({ error: 'Paciente no encontrado.' });
+  res.json(resultado);
+});
 app.get('/api/pacientes/:id/historial', async (req, res) => {
   const expediente = await res.locals.usuario.historial(req.params.id);
   if (!expediente) return res.status(404).json({ error: 'Expediente no encontrado' });
   res.json(expediente);
 });
 app.use('/api/pacientes/:id/hospitalizaciones', internamiento);
-app.use('/api/pacientes',pacientes);
-app.use('/api/catalogos',catalogos);
+app.use('/api/pacientes', pacientes);
+app.use('/api/catalogos', catalogos);
 app.use('/api', ambulatorio);
 app.use((err, req, res, next) => {
-  if (err.code==='23505') return res.status(409).json({error:'Ya existe un registro con ese DPI, colegiado, correo o nombre.'});
-  if (err.code==='23503') return res.status(422).json({error:'La referencia seleccionada no existe.'});
+  if (err.code === '23505' || err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
+    return res.status(409).json({ error: 'Ya existe un registro con ese DPI, colegiado, correo o nombre.' });
+  }
+  if (err.code === '23503' || err.code === 'ER_NO_REFERENCED_ROW_2' || err.errno === 1452) {
+    return res.status(422).json({ error: 'La referencia seleccionada no existe.' });
+  }
   if (err.status >= 400 && err.status < 500) {
     return res.status(err.status).json({ error: [404,409,422].includes(err.status) ? err.message : 'Revisa el cuerpo JSON de la solicitud.' });
   }
-  console.error('Error de consulta:', err.name, err.code || '');
+  console.error('Error de consulta:', err.name, err.code || err.errno || err.message || '');
   res.status(500).json({ error: 'No se pudo consultar el expediente' });
 });
-app.listen(3100, '127.0.0.1', () => console.log('API local en http://127.0.0.1:3100'));
+inicializarOdontologia().catch(() => {});
+app.listen(3100, () => console.log('API local en http://127.0.0.1:3100'));

@@ -69,9 +69,12 @@ function mostrarPanel(contenido, api, entidad,rol) {
     <label>Nombres<input name="nombres" required maxlength="100"></label>
     <label>Apellidos<input name="apellidos" required maxlength="100"></label>
     <label>Fecha de nacimiento<input name="fecha_nacimiento" type="date" required></label>
-    ${entidad==='hospital'?camposPaciente:''}
+    ${camposPaciente}
     <button>Abrir expediente</button>${mensaje}</form></section>`;
   const resultado = contenido.querySelector('.resultado');
+  const acceso=document.createElement('p');
+  acceso.textContent=rol==='secretaria'?'Acceso de secretaría · Gestión de pacientes':rol==='laboratorista'?'Acceso de laboratorista · Pacientes y resultados clínicos':'Acceso · '+rol;
+  contenido.prepend(acceso);
   const filtro = contenido.querySelector('#filtro');
   const lista = contenido.querySelector('#lista');
   let version = 0;
@@ -125,13 +128,14 @@ function mostrarPanel(contenido, api, entidad,rol) {
   }
   async function dibujar(id, actual, inicial) {
     if (rol==='secretaria') {
-      await mostrarSecretaria(resultado,id,api,atender,()=>abrir(id));
+      await mostrarSecretaria(resultado,id,api,atender,()=>abrir(id),entidad);
       return;
     }
     const { paciente, consultas, examenes, citas, antecedentes } = await api.historial(id);
     if (actual !== version) return;
     const {secciones,seleccionar}=crearExpediente(resultado,paciente,entidad==='hospital',inicial);
-    let destino=secciones.historial;
+    const historialAtenciones=secciones.consultas||secciones.historial;
+    let destino=historialAtenciones;
     const agregar = (tag, texto) => {
       const elemento = document.createElement(tag);
       elemento.textContent = texto;
@@ -140,7 +144,7 @@ function mostrarPanel(contenido, api, entidad,rol) {
     agregar('h3', 'Consultas (' + consultas.length + ')');
     if (!consultas.length) agregar('p', 'Sin consultas registradas.');
     for (const c of consultas) {
-      destino=document.createElement('article'); destino.className='registro-clinico'; secciones.historial.append(destino);
+      destino=document.createElement('article'); destino.className='registro-clinico'; historialAtenciones.append(destino);
       agregar('h4', c.motivo + ' · ' + new Date(c.fecha).toLocaleDateString('es-GT', { timeZone: 'America/Guatemala' }));
       if (c.notas) agregar('p', c.notas);
       if (c.id_cita) agregar('p', 'Cita de origen · ' + c.id_cita);
@@ -151,9 +155,11 @@ function mostrarPanel(contenido, api, entidad,rol) {
     }
     destino=secciones.historial;
     if (entidad === 'laboratorio') agregar('h3', 'Exámenes (' + examenes.length + ')');
+    if (entidad === 'laboratorio' && !examenes.length) agregar('p','Este paciente todavía no tiene resultados. Usa Registrar examen para añadir su primer estudio.');
     for (const e of examenes) {
       destino=document.createElement('article'); destino.className='registro-clinico'; secciones.historial.append(destino);
       agregar('h4', e.tipo);
+      if (e.fecha) agregar('p',new Date(e.fecha).toLocaleString('es-GT',{timeZone:'America/Guatemala'}));
       for (const [campo, valor] of Object.entries(e.resultados || {})) {
         const detalle = valor && typeof valor === 'object' ? (valor.valor !== undefined ? [valor.valor, valor.unidad].join(' ') : JSON.stringify(valor)) : valor;
         agregar('p', campo + ' · ' + detalle);
@@ -174,7 +180,12 @@ function mostrarPanel(contenido, api, entidad,rol) {
       <button type="button" data-agregar="farmaco">+ Otro medicamento</button><button>Guardar atención</button>${mensaje}</form>`);
     const formulario = resultado.querySelector('.consulta');
     const actualizar = () => { if (actual === version) abrir(paciente.id,resultado.dataset.seccion); };
-    if (entidad==='hospital') await mostrarDatos(secciones.datos,paciente.id,api,atender,actualizar);
+    await mostrarDatos(secciones.datos,paciente.id,api,atender,actualizar,entidad);
+    if (paciente.estado==='baja' && entidad==='laboratorio') {
+      secciones.atencion.innerHTML='<h2>Expediente archivado</h2><p>Consulta los registros en Atenciones anteriores.</p>';
+      secciones.examen.innerHTML='<h2>Expediente archivado</h2><p>Los estudios anteriores permanecen disponibles en Resultados de exámenes.</p>';
+      return;
+    }
     for (const boton of formulario.querySelectorAll('[data-agregar]')) {
       boton.onclick = () => {
         const copia = formulario.querySelector('.'+boton.dataset.agregar).cloneNode(true);
@@ -203,27 +214,53 @@ function mostrarPanel(contenido, api, entidad,rol) {
       if (actual===version) await mostrarInternamiento({secciones,paciente,api,atender,actualizar,rol});
     } else {
       secciones.examen.insertAdjacentHTML('beforeend', `<form class="examen">
-        <label>Tipo de examen<input name="tipo" required></label>
+        <label>Estudio<select name="tipo_id"></select></label>
+        <label>Nombre del estudio personalizado<input name="tipo" required maxlength="150"></label>
         <fieldset><legend>Resultados</legend><div class="mediciones"></div><button type="button" class="secundario">+ Otro resultado</button></fieldset>
         <button>Guardar examen</button>${mensaje}</form>`);
       const examen = resultado.querySelector('.examen');
+      const tipos=await api.tiposExamen();
+      for (const tipo of tipos) examen.elements.tipo_id.add(new Option(tipo.nombre,tipo.id));
+      examen.elements.tipo_id.add(new Option('Estudio personalizado',''));
       function agregarMedicion() {
         examen.querySelector('.mediciones').insertAdjacentHTML('beforeend', '<div class="medicion"><label>Parámetro<input required placeholder="Ej. Hemoglobina"></label><label>Resultado<input required placeholder="Ej. 13.2"></label><label>Unidad opcional<input placeholder="g/dL"></label><button type="button" class="secundario quitar">Quitar</button></div>');
       }
-      agregarMedicion();
+      function mostrarCampos() {
+        const tipo=tipos.find(t=>t.id===examen.elements.tipo_id.value);
+        examen.querySelector('.mediciones').replaceChildren();
+        examen.elements.tipo.disabled=Boolean(tipo);
+        examen.elements.tipo.parentElement.hidden=Boolean(tipo);
+        examen.querySelector('fieldset > button').hidden=Boolean(tipo);
+        if (!tipo) {agregarMedicion();return;}
+        for (const campo of tipo.campos) {
+          const fila=document.createElement('label');
+          fila.className='parametro';
+          fila.textContent=campo.etiqueta+(campo.unidad?' ('+campo.unidad+')':'');
+          const input=document.createElement('input');
+          input.dataset.campo=campo.nombre;
+          input.type=campo.tipo==='numero'?'number':'text';
+          if (campo.tipo==='numero') {input.min='0';input.step='any';}
+          else input.maxLength=2000;
+          input.required=true;
+          fila.append(input); examen.querySelector('.mediciones').append(fila);
+        }
+      }
+      mostrarCampos();
+      examen.elements.tipo_id.onchange=mostrarCampos;
       examen.querySelector('fieldset > button').onclick = agregarMedicion;
       examen.querySelector('.mediciones').onclick = e => {
         if (e.target.matches('.quitar') && examen.querySelectorAll('.medicion').length > 1) e.target.closest('.medicion').remove();
       };
       atender(examen, async d => {
         const resultados = Object.create(null);
+        for (const input of examen.querySelectorAll('[data-campo]')) resultados[input.dataset.campo]=input.type==='number'?Number(input.value):input.value.trim();
         for (const fila of examen.querySelectorAll('.medicion')) {
           const [campo, valor, unidad] = Array.from(fila.querySelectorAll('input'), input => input.value.trim());
           if (!campo || !valor || campo in resultados) throw Error('Cada resultado necesita un parámetro distinto y un valor.');
           const dato = /^-?\d+(\.\d+)?$/.test(valor) ? Number(valor) : valor;
           resultados[campo] = unidad ? { valor: dato, unidad } : dato;
         }
-        await api.examen(paciente.id, { tipo: d.tipo, resultados });
+        await api.examen(paciente.id, { tipo: d.tipo, tipo_id:d.tipo_id||undefined, resultados });
         actualizar();
       });
     }

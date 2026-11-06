@@ -1,5 +1,5 @@
 import express from 'express';
-import { postgres } from './repositorios.js';
+import { postgres, mongo } from './repositorios.js';
 
 const limites = {
   nombres:100, apellidos:100, dpi_cui:20, genero:20, direccion:255, telefono:20,
@@ -36,14 +36,19 @@ export async function datosPaciente(id) {
   return rows[0];
 }
 export const pacientes=express.Router();
-pacientes.use((req,res,next)=>res.locals.entidad==='hospital'?next():res.status(403).json({error:'Disponible en Hospital.'}));
 pacientes.use(express.json({limit:'16kb'}));
 pacientes.get('/:id/datos',async(req,res)=>{
-  const datos=await datosPaciente(req.params.id);
+  let datos;
+  if (res.locals.entidad==='laboratorio') {
+    const proyeccion=Object.fromEntries([...Object.keys(limites),'fecha_nacimiento','estado','motivo_baja','fecha_baja'].map(k=>[k,1]));
+    const documento=await mongo.db('laboratorio_clinico').collection('pacientes').findOne({_id:req.params.id},{projection:proyeccion});
+    if (documento) {const {_id,...resto}=documento;datos={...resto,id:_id,estado:documento.estado||'activo'};}
+  } else datos=await datosPaciente(req.params.id);
   if (!datos) return res.status(404).json({error:'Paciente no encontrado.'});
   res.json(datos);
 });
 pacientes.get('/:id/citas',async(req,res)=>{
+  if (res.locals.entidad!=='hospital') return res.status(403).json({error:'Disponible en Hospital.'});
   const {rows}=await postgres.query(`SELECT c.id_cita::text AS id,c.fecha_hora AS fecha,c.estado_cita AS estado,
     p.nombres||' '||p.apellidos AS medico FROM hospital.cita_medica c JOIN hospital.personal_medico p USING(id_personal)
     WHERE c.id_paciente::text=$1 ORDER BY c.fecha_hora DESC`,[req.params.id]);
@@ -53,6 +58,11 @@ pacientes.patch('/:id',async(req,res)=>{
   const datos=validarPaciente(req.body,true);
   const campos=Object.keys(datos);
   if (!campos.length) return res.status(422).json({error:'Incluye los datos que deseas actualizar.'});
+  if (res.locals.entidad==='laboratorio') {
+    const cambio=await mongo.db('laboratorio_clinico').collection('pacientes').updateOne({_id:req.params.id},{$set:datos});
+    if (!cambio.matchedCount) return res.status(404).json({error:'Paciente no encontrado.'});
+    return res.json({id:req.params.id});
+  }
   const {rows}=await postgres.query(`UPDATE hospital.paciente SET ${campos.map((c,i)=>c+'=$'+(i+2)).join(',')}
     WHERE id_paciente::text=$1 RETURNING id_paciente::text AS id`,[req.params.id,...Object.values(datos)]);
   if (!rows.length) return res.status(404).json({error:'Paciente no encontrado.'});
@@ -61,6 +71,12 @@ pacientes.patch('/:id',async(req,res)=>{
 pacientes.post('/:id/archivo',async(req,res)=>{
   const motivo=req.body?.motivo;
   if (typeof motivo!=='string' || !motivo.trim() || motivo.length>2000 || motivo.includes('\u0000')) return res.status(422).json({error:'Escribe la causa del archivo.'});
+  if (res.locals.entidad==='laboratorio') {
+    const coleccion=mongo.db('laboratorio_clinico').collection('pacientes');
+    const cambio=await coleccion.updateOne({_id:req.params.id,estado:{$ne:'baja'}},{$set:{estado:'baja',motivo_baja:motivo.trim(),fecha_baja:new Date()}});
+    if (!cambio.matchedCount && !await coleccion.findOne({_id:req.params.id},{projection:{_id:1}})) return res.status(404).json({error:'Paciente no encontrado.'});
+    return res.json({estado:'baja'});
+  }
   const db=await postgres.connect();
   try {
     await db.query('BEGIN');

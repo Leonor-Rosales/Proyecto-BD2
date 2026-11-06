@@ -7,7 +7,7 @@ export const postgres = new pg.Pool({
   user: 'postgres', password: process.env.HOSPITAL_PASSWORD,
   connectionTimeoutMillis: 5000
 });
-const mongo = new MongoClient('mongodb://127.0.0.1:57017', {
+export const mongo = new MongoClient('mongodb://127.0.0.1:57017', {
   auth: { username: 'maria_admin', password: process.env.LAB_PASSWORD },
   authSource: 'admin', serverSelectionTimeoutMS: 5000
 });
@@ -29,7 +29,7 @@ export async function altaHospital(datos) {
 export async function altaLaboratorio(datos) {
   const id = 'PAC-' + randomUUID();
   await mongo.db('laboratorio_clinico').collection('pacientes').insertOne({
-    _id: id, ...datos, fecha_apertura: new Date()
+    _id: id, ...datos, estado:'activo', fecha_apertura: new Date()
   });
   return id;
 }
@@ -69,8 +69,8 @@ export async function historialLaboratorio(id) {
   if (!paciente) return null;
   const examenes = await db.collection('examenes').find({ paciente_id: id }).sort({ _id: 1 }).toArray();
   return {
-    paciente: { id, nombres: paciente.nombres, apellidos: paciente.apellidos },
-    consultas: (paciente.consultas || []).slice().reverse(), examenes
+    paciente: { id, nombres: paciente.nombres, apellidos: paciente.apellidos, estado:paciente.estado||'activo' },
+    consultas: (paciente.consultas || []).slice().reverse(), examenes:[...examenes,...(paciente.examenes || [])]
   };
 }
 
@@ -150,14 +150,22 @@ export async function consultaHospital(id, atencion) {
 export async function consultaLaboratorio(id, atencion) {
   const consulta = { ...atencion, id: randomUUID(), fecha: new Date() };
   const result = await mongo.db('laboratorio_clinico').collection('pacientes')
-    .updateOne({ _id: id }, { $push: { consultas: consulta } });
+    .updateOne({ _id: id,estado:{$nin:['baja','inactivo']} }, { $push: { consultas: consulta } });
+  if (!result.matchedCount && await mongo.db('laboratorio_clinico').collection('pacientes').findOne({_id:id})) {
+    throw Object.assign(new Error('El expediente está archivado o inactivo.'),{status:409});
+  }
   return result.matchedCount ? consulta.id : null;
 }
 
 export async function examenLaboratorio(paciente_id, examen) {
   const db = mongo.db('laboratorio_clinico');
-  if (!await db.collection('pacientes').findOne({ _id: paciente_id }, { projection: { _id: 1 } })) return null;
   const _id = 'EX-' + randomUUID();
-  await db.collection('examenes').insertOne({ _id, paciente_id, ...examen, fecha: new Date() });
+  const resultado=await db.collection('pacientes').updateOne(
+    {_id:paciente_id,estado:{$nin:['baja','inactivo']}},
+    {$push:{examenes:{_id,paciente_id,...examen,fecha:new Date()}}});
+  if (!resultado.matchedCount) {
+    if (await db.collection('pacientes').findOne({_id:paciente_id},{projection:{_id:1}})) throw Object.assign(new Error('El expediente está archivado o inactivo.'),{status:409});
+    return null;
+  }
   return _id;
 }

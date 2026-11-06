@@ -1,3 +1,4 @@
+import { tiposExamen } from './tipos-examen.js';
 function invalido(mensaje) {
   throw Object.assign(new Error(mensaje), { status: 422 });
 }
@@ -50,5 +51,33 @@ export function leerConsulta(body, hospital) {
 export function leerExamen(body) {
   const resultados = objeto(body?.resultados, 'resultados');
   if (!Object.keys(resultados).length) invalido('Incluye al menos un resultado.');
-  return { tipo: texto(body.tipo, 'tipo', 150), resultados };
+  if (body.tipo_id) {
+    const tipo=tiposExamen.find(t=>t.id===body.tipo_id);
+    if (!tipo) invalido('Tipo de examen desconocido.');
+    const normalizados={};
+    for (const campo of tipo.campos) {
+      const entrada=resultados[campo.nombre];
+      const valor=entrada && typeof entrada==='object'?entrada.valor:entrada;
+      if (campo.tipo==='numero' && (typeof valor!=='number'||!Number.isFinite(valor)||valor<0)) invalido('Ingresa un valor numérico válido en '+campo.etiqueta+'.');
+      normalizados[campo.nombre]={valor:campo.tipo==='texto'?texto(valor,campo.etiqueta,2000):valor};
+      if (campo.unidad) normalizados[campo.nombre].unidad=campo.unidad;
+    }
+    if (Object.keys(resultados).some(k=>!tipo.campos.some(c=>c.nombre===k))) invalido('El examen contiene parámetros que no corresponden al tipo seleccionado.');
+    return {tipo_id:tipo.id,tipo:tipo.nombre,resultados:normalizados};
+  }
+  const personalizados=Object.create(null);
+  for (const [campo,entrada] of Object.entries(resultados)) {
+    texto(campo,'parámetro',100);
+    if (campo.startsWith('$')||campo.includes('.')||['__proto__','constructor','prototype'].includes(campo)) invalido('Nombre de parámetro inválido.');
+    const estructurado=entrada && typeof entrada==='object' && !Array.isArray(entrada);
+    const valor=estructurado?entrada.valor:entrada;
+    if (typeof valor==='number') {
+      if (!Number.isFinite(valor)) invalido('Resultado numérico inválido.');
+    } else texto(valor,campo,2000);
+    if (estructurado) {
+      personalizados[campo]={valor};
+      if (entrada.unidad) personalizados[campo].unidad=texto(entrada.unidad,'unidad',50);
+    } else personalizados[campo]=valor;
+  }
+  return { tipo: texto(body.tipo, 'tipo', 150), resultados:personalizados };
 }

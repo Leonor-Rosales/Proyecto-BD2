@@ -43,6 +43,7 @@ export function leerConsulta(body, hospital) {
     })
   };
   if (hospital) consulta.id_personal = texto(String(datos.id_personal ?? ''), 'id_personal', 19);
+  if (hospital && datos.id_cita != null) consulta.id_cita = texto(String(datos.id_cita), 'id_cita', 19);
   return consulta;
 }
 

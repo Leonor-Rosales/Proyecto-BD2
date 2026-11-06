@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { altaHospital, altaLaboratorio, historialHospital, historialLaboratorio, consultaHospital, consultaLaboratorio, examenLaboratorio, medicosHospital } from './repositorios.js';
 import { leerConsulta, leerExamen } from './atencion.js';
+import { buscarHospital, buscarLaboratorio } from './repositorios.js';
+import { ambulatorio } from './ambulatorio.js';
+import { internamiento } from './internamiento.js';
 
 const usuarios = new Map([
   ['maria.hospital', { clave: process.env.API_HOSPITAL_PASSWORD, historial: historialHospital, alta: altaHospital, consulta: consultaHospital, medicos: medicosHospital }],
@@ -15,7 +18,7 @@ const hash = valor => createHash('sha256').update(valor).digest();
 const app = express();
 app.disable('x-powered-by');
 app.get('/api/salud', (_req, res) => res.json({ estado: 'activo' }));
-app.use(['/api/pacientes', '/api/sesion', '/api/medicos'], (req, res, next) => {
+app.use(['/api/pacientes', '/api/sesion', '/api/medicos', '/api/agenda'], (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   const token = /^Basic ([A-Za-z0-9+/=]+)$/i.exec(req.get('Authorization') || '');
   const credencial = Buffer.from(token?.[1] || '', 'base64').toString();
@@ -29,6 +32,14 @@ app.use(['/api/pacientes', '/api/sesion', '/api/medicos'], (req, res, next) => {
   next();
 });
 app.get('/api/sesion', (_req, res) => res.json({ entidad: res.locals.entidad }));
+app.get('/api/pacientes', async (req, res) => {
+  const termino = req.query.buscar ?? '';
+  if (typeof termino !== 'string' || termino.length > 150 || termino.includes('\u0000')) {
+    return res.status(400).json({ error: 'Ingresa un nombre o identificador válido.' });
+  }
+  const buscar = res.locals.entidad === 'hospital' ? buscarHospital : buscarLaboratorio;
+  res.json(await buscar(termino.trim()));
+});
 app.use(express.static(fileURLToPath(new URL('../frontend/', import.meta.url))));
 app.get('/api/medicos', async (_req, res) => {
   const { medicos } = res.locals.usuario;
@@ -69,9 +80,11 @@ app.get('/api/pacientes/:id/historial', async (req, res) => {
   if (!expediente) return res.status(404).json({ error: 'Expediente no encontrado' });
   res.json(expediente);
 });
+app.use('/api/pacientes/:id/hospitalizaciones', internamiento);
+app.use('/api', ambulatorio);
 app.use((err, req, res, next) => {
   if (err.status >= 400 && err.status < 500) {
-    return res.status(err.status).json({ error: err.status === 422 ? err.message : 'Revisa el cuerpo JSON de la solicitud.' });
+    return res.status(err.status).json({ error: [404,409,422].includes(err.status) ? err.message : 'Revisa el cuerpo JSON de la solicitud.' });
   }
   console.error('Error de consulta:', err.name, err.code || '');
   res.status(500).json({ error: 'No se pudo consultar el expediente' });

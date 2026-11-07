@@ -500,12 +500,15 @@ export async function archivarPediatria(id, motivo) {
 }
 
 export async function archivarLaboratorio(id, motivo) {
-  const db = mongo.db('laboratorio_clinico');
-  const res = await db.collection('pacientes').updateOne(
-    { _id: id },
+  const pacientes = mongo.db('laboratorio_clinico').collection('pacientes');
+  const cambio = await pacientes.updateOne(
+    { _id: id, estado: { $ne: 'baja' } },
     { $set: { estado: 'baja', motivo_baja: motivo.trim(), fecha_baja: new Date() } }
   );
-  if (!res.matchedCount) return null;
+  if (!cambio.matchedCount) {
+    const archivado = await pacientes.findOne({ _id: id, estado: 'baja' }, { projection: { _id: 1 } });
+    if (!archivado) return null;
+  }
   return { estado: 'baja' };
 }
 

@@ -8,6 +8,17 @@ export async function emitirFactura(db, ingreso) {
     SELECT $1,total,CASE WHEN total=0 THEN 'pagada' ELSE 'pendiente' END
     FROM (SELECT coalesce(sum(${subtotal}),0) total FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=$1) s
     ON CONFLICT (id_hospitalizacion) DO NOTHING`,[ingreso]);
+  await db.query(`UPDATE hospital.pago p SET id_factura=f.id_factura FROM hospital.factura f
+    WHERE f.id_hospitalizacion=$1 AND p.id_hospitalizacion=$1 AND p.id_factura IS NULL`,[ingreso]);
+  await actualizarEstadoFactura(db, ingreso);
+}
+
+async function actualizarEstadoFactura(db, ingreso) {
+  await db.query(`UPDATE hospital.factura f SET estado_pago=CASE
+    WHEN f.monto_total=abonos.total THEN 'pagada'
+    WHEN abonos.total>0 THEN 'parcial' ELSE 'pendiente' END
+    FROM (SELECT coalesce(sum(monto),0) total FROM hospital.pago WHERE id_hospitalizacion=$1) abonos
+    WHERE f.id_hospitalizacion=$1`,[ingreso]);
 }
 
 function rechazar(status,mensaje) { throw Object.assign(new Error(mensaje),{status}); }
@@ -32,7 +43,8 @@ facturacion.get('/:ingreso/cuenta',async(req,res)=>{
       WHERE c.id_hospitalizacion=h.id_hospitalizacion ORDER BY c.id_cargo) AS cargos,
     (SELECT to_jsonb(f) FROM (${resumen.replace('=$1','=h.id_hospitalizacion')}) f) AS factura,
     ARRAY(SELECT jsonb_build_object('id',p.id_pago::text,'monto',p.monto,'metodo',p.metodo_pago,'referencia',p.referencia,'fecha',p.fecha_pago)
-      FROM hospital.pago p JOIN hospital.factura f USING(id_factura) WHERE f.id_hospitalizacion=h.id_hospitalizacion ORDER BY p.id_pago) AS pagos
+      FROM hospital.pago p WHERE p.id_hospitalizacion=h.id_hospitalizacion ORDER BY p.id_pago) AS pagos,
+    (SELECT coalesce(sum(monto),0) FROM hospital.pago WHERE id_hospitalizacion=h.id_hospitalizacion) AS abonado
     FROM hospital.hospitalizacion h JOIN hospital.historial_clinico e USING(id_historial)
     WHERE h.id_hospitalizacion::text=$1 AND e.id_paciente::text=$2`,[req.params.ingreso,req.params.id]);
   if (!rows.length) rechazar(404,'Ingreso no encontrado.');
@@ -41,6 +53,7 @@ facturacion.get('/:ingreso/cuenta',async(req,res)=>{
 
 function registrar(operacion) {
   return async(req,res)=>{
+    if (operacion==='pago' && res.locals.usuario.rol!=='administrador') return res.status(403).json({error:'El registro de pagos requiere la cuenta administradora.'});
     const datos=req.body || {};
     const clave=req.get('Idempotency-Key');
     if (clave && !/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(clave)) rechazar(422,'La clave de la operación debe ser UUID.');
@@ -102,17 +115,20 @@ async function cobrar(db,h,d,clave,administrado=false) {
 }
 async function pagar(db,h,d,clave) {
   const {rows:[f]}=await db.query(resumen,[h.id]);
-  if (!f) rechazar(409,'Primero debe emitirse la factura.');
   if (clave) {
-    const previo=await db.query('SELECT id_pago AS id FROM hospital.pago WHERE id_factura=$1 AND solicitud=$2',[f.id,clave]);
+    const previo=await db.query('SELECT id_pago AS id FROM hospital.pago WHERE id_hospitalizacion=$1 AND solicitud=$2',[h.id,clave]);
     if (previo.rowCount) return previo.rows[0];
   }
   if (!positivo(d.monto) || !['efectivo','tarjeta','seguro'].includes(d.metodo) ||
       (d.referencia!=null && (typeof d.referencia!=='string'||d.referencia.length>100||d.referencia.includes('\u0000')))) rechazar(422,'Revisa monto, método y referencia.');
-  const {rows}=await db.query(`INSERT INTO hospital.pago(id_factura,monto,metodo_pago,referencia,solicitud)
-    SELECT $1,$2,$3,$4,$5 WHERE $2::numeric<=$6::numeric RETURNING id_pago AS id`,[f.id,d.monto,d.metodo,d.referencia||null,clave,f.saldo]);
+  if (!f && h.estado!=='internado') rechazar(409,'Emite la factura del ingreso antes de registrar el pago.');
+  const saldo=f?.saldo ?? (await db.query(`SELECT
+    (SELECT coalesce(sum(${subtotal}),0) FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=$1)
+    -(SELECT coalesce(sum(monto),0) FROM hospital.pago WHERE id_hospitalizacion=$1) AS pendiente`,[h.id])).rows[0].pendiente;
+  const {rows}=await db.query(`INSERT INTO hospital.pago(id_factura,monto,metodo_pago,referencia,solicitud,id_hospitalizacion)
+    SELECT $1,$2::numeric,$3,$4,$5,$7 WHERE $2::numeric<=$6::numeric RETURNING id_pago AS id`,[f?.id??null,d.monto,d.metodo,d.referencia||null,clave,saldo,h.id]);
   if (!rows.length) rechazar(409,'El pago supera el saldo pendiente.');
-  await db.query(`UPDATE hospital.factura SET estado_pago=CASE WHEN $2::numeric=$3::numeric THEN 'pagada' ELSE 'parcial' END WHERE id_factura=$1`,[f.id,d.monto,f.saldo]);
+  if (f) await actualizarEstadoFactura(db,h.id);
   return rows[0];
 }
 facturacion.post('/:ingreso/cargos',registrar('cargo'));

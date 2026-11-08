@@ -16,6 +16,9 @@ export function mostrarCuenta(cuerpo,paciente,h,api,atender,fecha,abrir,puedeCob
       const resumen=document.createElement('dl');
       resumen.className='resumen-cuenta';
       const cifras=[['Cargos acumulados',moneda(cuenta.acumulado)]];
+      const saldo=cuenta.factura?.saldo ?? ((Math.round(Number(cuenta.acumulado)*100)-Math.round(Number(cuenta.abonado)*100))/100).toFixed(2);
+      cifras.push(['Total abonado',moneda(cuenta.abonado)]);
+      if (!cuenta.factura) cifras.push(['Pendiente de abonar',moneda(saldo)]);
       if (cuenta.factura) cifras.push(['Saldo pendiente',moneda(cuenta.factura.saldo)],['Factura '+cuenta.factura.id,cuenta.factura.estado]);
       for (const [nombre,valor] of cifras) {
         const grupo=document.createElement('div');
@@ -67,17 +70,17 @@ export function mostrarCuenta(cuerpo,paciente,h,api,atender,fecha,abrir,puedeCob
         }
         tipo(); form.elements.tipo.onchange=tipo; form.elements.id_medicamento.onchange=tipo; guardar(form,'cargos');
       }
-      if (cuenta.factura) {
-        const f=cuenta.factura;
         if (cuenta.pagos.length) {const titulo=document.createElement('h3'); titulo.textContent='Pagos registrados'; vista.append(titulo);}
         for (const pago of cuenta.pagos) linea('Pago '+pago.id+' · '+moneda(pago.monto)+' · '+pago.metodo+(pago.referencia?' · '+pago.referencia:''));
-        if (Number(f.saldo)>0 && puedeCobrar) {
+        if ((cuenta.factura || h.estado==='internado') && Number(saldo)>0 && puedeCobrar) {
           vista.insertAdjacentHTML('beforeend',`<form class="pago"><label>Abono (Q)<input name="monto" type="number" min="0.01" step="0.01" required></label>
             <label>Método<select name="metodo"><option>efectivo</option><option>tarjeta</option><option>seguro</option></select></label>
             <label>Referencia de pago (opcional)<input name="referencia" maxlength="100"></label><button>Registrar pago</button><p class="mensaje" role="status"></p></form>`);
-          const form=vista.querySelector('.pago'); form.elements.monto.max=f.saldo; guardar(form,'pagos');
+          const form=vista.querySelector('.pago'); form.elements.monto.max=saldo;
+          if (!cuenta.factura) form.querySelector('button').textContent='Registrar abono';
+          guardar(form,'pagos');
         }
-      } else if (h.estado==='alta' && puedeCobrar) {
+      if (!cuenta.factura && h.estado==='alta' && puedeCobrar) {
         vista.insertAdjacentHTML('beforeend','<form><button>Emitir factura del ingreso anterior</button><p class="mensaje" role="status"></p></form>');
         guardar(vista.querySelector('form'),'factura');
       }

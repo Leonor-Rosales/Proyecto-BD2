@@ -104,3 +104,16 @@ main:has(#expediente:not([hidden])) > h1 { font-size: 1.65rem; letter-spacing: -
   .hoja fieldset { grid-template-columns: minmax(0,1fr); }
   .hoja details { padding: 12px; }
 }
+
+.menu-catalogos { display:flex; flex-wrap:wrap; gap:8px; padding:4px 0 18px; border-bottom:1px solid #d9e5e2; }
+.menu-catalogos button { color:#34555c; background:#f1f5f5; text-align:left; }
+.menu-catalogos button[aria-pressed=true] { background:#155d52; color:white; }
+.catalogo-vista { margin-top:24px; max-width:680px; }
+.catalogo-vista > h3 { font-size:1.35rem; margin:0 0 16px; }
+.selector-panel { display:grid; gap:5px; max-width:36rem; margin:16px 0 24px; color:#38585d; }
+.selector-panel select { width:100%; min-width:0; background-color:white; }
+.catalogo-vista > ul { padding:0; list-style:none; }
+.catalogo-vista > ul li { padding:12px 2px; border-bottom:1px solid #e2e9e8; }
+.catalogo-vista > form { padding:20px; border:1px solid #d9e5e2; border-radius:12px; }
+.catalogo-vista form h3 { margin:0; }
+@media(max-width:650px) { .menu-catalogos { display:grid;grid-template-columns:repeat(2,minmax(0,1fr)); } .menu-catalogos button { width:100%;font-size:.9rem; } }

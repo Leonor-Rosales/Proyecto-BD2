@@ -267,6 +267,14 @@ function mostrarPanel(contenido, api, entidad,rol) {
       secciones.examen.innerHTML='<h2>Expediente archivado</h2><p>Los estudios anteriores permanecen disponibles en Resultados de exámenes.</p>';
       return;
     }
+    if (entidad==='hospital') {
+      const catalogo=await api.catalogos('procedimientos');
+      formulario.insertAdjacentHTML('beforeend','<datalist id="procedimientos-hospital"></datalist>');
+      const lista=formulario.querySelector('datalist');
+      for (const p of catalogo) lista.append(new Option(p.nombre+' · Q'+p.precio,p.nombre));
+      formulario.elements.procedimiento.setAttribute('list',lista.id);
+      formulario.elements.procedimiento.placeholder='Elige del catálogo o escribe uno sin cargo';
+    }
     for (const boton of formulario.querySelectorAll('[data-agregar]')) {
       boton.onclick = () => {
         const copia = formulario.querySelector('.'+boton.dataset.agregar).cloneNode(true);
@@ -275,6 +283,7 @@ function mostrarPanel(contenido, api, entidad,rol) {
         copia.querySelector('input').focus();
       };
     }
+    const claveConsulta=entidad==='hospital'?crypto.randomUUID():undefined;
     atender(formulario, async d => {
       const datos = { motivo: d.motivo, notas: d.notas, id_personal: formulario.elements.id_personal?.value };
       if (d.id_cita) datos.id_cita=d.id_cita;
@@ -304,7 +313,7 @@ function mostrarPanel(contenido, api, entidad,rol) {
       }
       const medicamentos=filas('.farmaco').filter(f=>Object.values(f).some(Boolean));
       if (medicamentos.length) datos.recetas=[{medicamentos}];
-      await api.consulta(paciente.id, datos);
+      await api.consulta(paciente.id, datos, claveConsulta);
       actualizar();
     });
     if (['hospital', 'pediatria', 'odontologia'].includes(entidad)) {

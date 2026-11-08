@@ -73,7 +73,11 @@ function movimiento(tipo) {
         await db.query("UPDATE hospital.hospitalizacion SET fecha_alta=$1,estado='alta' WHERE id_hospitalizacion=$2",[fecha,id]);
         await emitirFactura(db,id);
       } else {
-        await db.query('INSERT INTO hospital.estancia(id_hospitalizacion,id_habitacion,fecha_inicio) VALUES ($1,$2,$3)',[id,destino,fecha]);
+        const estancia=await db.query(`INSERT INTO hospital.estancia
+          (id_hospitalizacion,id_habitacion,fecha_inicio,tarifa_diaria)
+          SELECT $1,h.id_habitacion,$3,t.tarifa_diaria FROM hospital.habitacion h
+          JOIN hospital.tarifa_estancia t USING(tipo_unidad) WHERE h.id_habitacion=$2`,[id,destino,fecha]);
+        if (!estancia.rowCount) fallo(409,'Configura la tarifa de la unidad antes de iniciar la estancia.');
       }
       await db.query(`UPDATE hospital.habitacion h SET estado=CASE WHEN h.capacidad<=${camasOcupadas}
         THEN 'ocupada' ELSE 'disponible' END WHERE h.id_habitacion::text=ANY($1::text[]) AND estado<>'mantenimiento'`,[habitaciones]);

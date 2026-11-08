@@ -31,7 +31,7 @@ export function conectar(usuario, clave) {
     antecedente: (id,datos) => solicitar('pacientes/' + encodeURIComponent(id) + '/antecedentes',{method:'POST',body:JSON.stringify(datos)}),
     pacientes: termino => solicitar('pacientes?buscar=' + encodeURIComponent(termino)),
     medicos: () => solicitar('medicos'),
-    consulta: (id, datos) => solicitar('pacientes/' + encodeURIComponent(id) + '/consultas', { method: 'POST', body: JSON.stringify(datos) }),
+    consulta: (id, datos, clave) => solicitar('pacientes/' + encodeURIComponent(id) + '/consultas', { method: 'POST', headers:clave?{'Idempotency-Key':clave}:{}, body: JSON.stringify(datos) }),
     examen: (id, datos) => solicitar('pacientes/' + encodeURIComponent(id) + '/examenes', { method: 'POST', body: JSON.stringify(datos) }),
     sesion: () => solicitar('sesion'),
     historial: id => solicitar('pacientes/' + encodeURIComponent(id) + '/historial'),

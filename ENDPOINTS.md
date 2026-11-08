@@ -2,11 +2,11 @@
 
 ## Levantar una copia local
 
-Desde la raíz del repositorio, usa Docker Desktop en modo Linux y Node.js 24. En una copia nueva, crea un archivo `.env` con cuatro valores locales distintos. Este ejemplo de PowerShell genera las claves antes del primer arranque. Conserva el archivo mientras uses los mismos volúmenes.
+Desde la raíz del repositorio, usa Docker Desktop en modo Linux y Node.js 24. En una copia nueva, este ejemplo de PowerShell genera las claves locales que necesita Compose y habilita las cuentas de prueba de Hospital y Laboratorio. Conserva el archivo mientras uses los mismos volúmenes.
 
 ```powershell
 if (!(Test-Path .env)) {
-  'HOSPITAL_PASSWORD','LAB_PASSWORD','API_HOSPITAL_PASSWORD','API_LAB_PASSWORD' |
+  'HOSPITAL_PASSWORD','LAB_PASSWORD','PEDIATRIA_ROOT_PASSWORD','PEDIATRIA_PASSWORD','API_HOSPITAL_PASSWORD','API_LAB_PASSWORD','API_LABORATORISTA_PASSWORD','API_SECRETARIA_LAB_PASSWORD' |
     ForEach-Object { "$_=$([guid]::NewGuid().ToString('N'))" } | Set-Content .env
 }
 docker compose up -d --wait
@@ -14,7 +14,21 @@ npm --prefix backend ci
 npm --prefix backend start
 ```
 
-Abre la aplicación en `http://127.0.0.1:3100`. Los scripts iniciales crean un médico y una institución en Hospital, y el paciente de laboratorio `PAC-001`. Para probar Hospital en una instalación nueva, primero crea un paciente y usa el ID devuelto.
+Abre la aplicación en `http://127.0.0.1:3100`. En una instalación nueva Docker carga los ejemplos automáticamente.
+
+### Repetir la demostración de María
+
+1. En Hospital, entra con `maria.hospital` y busca **Demostración Hospital** por apellido. Abre el historial y revisa la consulta, el diagnóstico, el procedimiento y la receta con su medicamento. El ID se asigna al crear el paciente.
+2. En Laboratorio, entra con `maria.laboratorio`, busca **PAC-001** y abre **Resultados de exámenes**. En la copia nueva aparecen hematología con hemoglobina de 13.2 g/dL y orina con color, aspecto y pH de 6.
+3. Para repetirlo por API, usa `GET /api/pacientes?buscar=Demostraci%C3%B3n%20Hospital` con la cuenta hospitalaria y abre `GET /api/pacientes/:id/historial` con el ID devuelto. Con la cuenta del laboratorio consulta `GET /api/pacientes/PAC-001/historial` y revisa el arreglo `examenes`.
+
+Si ya tienes los volúmenes y contenedores locales del proyecto, aplica los ejemplos desde PowerShell en la raíz. Estos comandos usan los archivos montados por Docker y se pueden repetir. En Hospital se conserva la ficha con DPI ficticio `BD2-DEMO-ENTREGA` si ya existe. En Laboratorio se conservan los documentos existentes.
+
+```powershell
+docker start bd2-maria-hospital-1 bd2-maria-laboratorio-1
+docker exec bd2-maria-hospital-1 psql -v ON_ERROR_STOP=1 -U postgres -d hospital_general -f /docker-entrypoint-initdb.d/010_datos_demostracion.sql
+docker exec bd2-maria-laboratorio-1 mongosh laboratorio_clinico --quiet --eval 'db.getSiblingDB("admin").auth(process.env.MONGO_INITDB_ROOT_USERNAME,process.env.MONGO_INITDB_ROOT_PASSWORD); load("/docker-entrypoint-initdb.d/001_colecciones.js")'
+```
 
 ## Autenticación y rutas disponibles
 
@@ -142,6 +156,14 @@ Usa los identificadores devueltos por las consultas. Un conflicto de capacidad o
 
 ## Hospital · cargos, factura y pagos
 
+GET /api/catalogos/procedimientos lista los procedimientos y sus precios. POST en esa misma ruta permite al administrador crear o actualizar por nombre, por ejemplo `{"nombre":"Curación simple","precio":"50.00"}`. En una consulta de Hospital, cada tratamiento cuyo nombre coincide con el catálogo (sin distinguir mayúsculas) conserva su registro clínico y genera un cargo por el precio vigente si el paciente está internado. Los procedimientos de texto libre y los de precio cero quedan solo en el historial. La versión local de la migración 012 incluye el catálogo y la referencia al tratamiento en el cargo.
+
+La versión completa de la migración 012 incluye los honorarios por visita. Si ya aplicaste su primera versión, vuelve a ejecutar el mismo archivo una vez. Al guardar una consulta de un paciente internado se registra en la misma transacción el cargo del médico que atendió, al precio vigente. La tarifa inicial de demostración es Q100 por visita. Un administrador puede cambiarla en Médicos y especialidades o con PATCH /api/catalogos/medicos/:id/tarifa y `{"tarifa_visita":"125.00"}`. Cero permite registrar visitas sin honorario. Las citas y consultas ambulatorias no generan cargos de hospitalización. En POST /api/pacientes/:id/consultas del Hospital, enviar el mismo encabezado Idempotency-Key (UUID) al reintentar devuelve el ID original.
+
+La migración `hospital/012_tarifas_estancia.sql` añade tarifas diarias por unidad. Con volúmenes existentes se aplica después de `011_abonos.sql`. GET /api/catalogos/tarifas-estancia devuelve el catálogo y PATCH /api/catalogos/tarifas-estancia/:unidad recibe `{"tarifa_diaria":"240.00"}` con una cuenta administradora. El ingreso o traslado guarda la tarifa vigente en la nueva estancia. Los tramos iniciados antes de aplicar la migración mantienen su tratamiento anterior.
+
+Al consultar la cuenta, `estancias` detalla cada tramo con su habitación, tarifa, inicio, fin e importe. El importe se calcula por segundos sobre 24 horas y se redondea a centavos por tramo. Se incluye en el acumulado disponible para abonar. Al dar el alta se fija la fecha final y se incluye el importe en la factura. Los precios iniciales del catálogo son ficticios y editables.
+
 Para volúmenes existentes, aplica la migración desde PowerShell antes de iniciar la API:
 
 ```powershell
@@ -157,7 +179,7 @@ Las rutas usan el prefijo `/api/pacientes/:id/hospitalizaciones` y la cuenta del
 | POST | /:ingreso/cargos | Registra un cargo mientras el paciente está internado. Devuelve 201 con su ID. |
 | POST | /:ingreso/alta | Cierra la estancia, libera la cama y emite una sola factura en la misma transacción. |
 | POST | /:ingreso/factura | Emite la factura de un ingreso anterior ya dado de alta o devuelve la existente. Responde 200. |
-| POST | /:ingreso/pagos | Registra un abono y actualiza el estado de la factura. Devuelve 201 con el ID del pago. |
+| POST | /:ingreso/pagos | Registra un abono contra los cargos pendientes durante la hospitalización o contra el saldo de la factura después del alta. Devuelve 201 con el ID del pago. |
 
 Ejemplo de cargo:
 
@@ -168,6 +190,8 @@ Ejemplo de cargo:
 Tipos: material, servicio, medicamento (requiere id_medicamento) y honorario_medico (requiere id_personal). Los precios están en quetzales. La cantidad y el precio son positivos y admiten dos decimales. Cada subtotal se redondea al centavo antes de sumar. Un alta sin cargos genera una factura de Q0.00 saldada.
 
 Ejemplo de pago:
+
+Para habilitar abonos previos al alta en un volumen existente, aplica `hospital/011_abonos.sql` con el mismo procedimiento de las migraciones anteriores y reinicia la API. La cuenta incluye `abonado` y la lista de pagos incluso antes de la factura. Al dar el alta, los abonos quedan asociados a la factura conservando su ID, fecha y referencia.
 
 ```json
 {"monto":"10.00","metodo":"efectivo","referencia":"DEMO-01"}

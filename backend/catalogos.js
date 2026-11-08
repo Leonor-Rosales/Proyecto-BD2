@@ -28,6 +28,15 @@ catalogos.post('/medicos',async(req,res)=>{
 export async function listarMedicamentos() {
   return (await postgres.query('SELECT id_medicamento AS id,nombre_generico,presentacion,unidad_medida,precio_unitario FROM hospital.medicamento ORDER BY nombre_generico,id_medicamento')).rows;
 }
+catalogos.patch('/medicos/:id/tarifa',async(req,res)=>{
+  if (res.locals.usuario.rol!=='administrador') return res.status(403).json({error:'Se requiere la cuenta administradora.'});
+  const valor=req.body?.tarifa_visita;
+  if (!/^(0|[1-9]\d{0,7})(\.\d{1,2})?$/.test(String(valor))) return res.status(422).json({error:'Ingresa un honorario válido con hasta dos decimales.'});
+  const {rows}=await postgres.query(`UPDATE hospital.personal_medico SET tarifa_visita=$1
+    WHERE id_personal::text=$2 AND rol IN ('medico','especialista') RETURNING tarifa_visita`,[valor,req.params.id]);
+  if (!rows.length) return res.status(404).json({error:'Médico no encontrado.'});
+  res.json(rows[0]);
+});
 catalogos.get('/medicamentos',async(req,res)=>res.json(await listarMedicamentos()));
 catalogos.post('/medicamentos',async(req,res)=>{
   const {nombre_generico,presentacion,unidad_medida,precio_unitario}=req.body||{};
@@ -46,6 +55,28 @@ catalogos.get('/habitaciones',async(req,res)=>{
   const {rows}=await postgres.query(`SELECT h.id_habitacion AS id,numero,tipo_unidad,piso,capacidad,estado FROM hospital.habitacion h
     JOIN hospital.institucion USING(id_institucion) WHERE nombre='Hospital General de Prueba' ORDER BY numero`);
   res.json(rows);
+});
+catalogos.get('/tarifas-estancia',async(req,res)=>{
+  res.json((await postgres.query('SELECT tipo_unidad,tarifa_diaria FROM hospital.tarifa_estancia ORDER BY tipo_unidad')).rows);
+});
+catalogos.get('/procedimientos',async(req,res)=>{
+  const {rows}=await postgres.query('SELECT id_procedimiento AS id,nombre,precio FROM hospital.procedimiento_catalogo ORDER BY nombre');
+  res.json(rows);
+});
+catalogos.post('/procedimientos',async(req,res)=>{
+  if (res.locals.usuario.rol!=='administrador') return res.status(403).json({error:'Se requiere la cuenta administradora.'});
+  const {nombre,precio:importe}=req.body||{};
+  if (!texto(nombre,150)||!/^(0|[1-9]\d{0,7})(\.\d{1,2})?$/.test(String(importe))) return res.status(422).json({error:'Ingresa un nombre y un precio válido.'});
+  const {rows}=await postgres.query(`INSERT INTO hospital.procedimiento_catalogo(nombre,precio) VALUES ($1,$2)
+    ON CONFLICT (lower(nombre)) DO UPDATE SET precio=excluded.precio RETURNING id_procedimiento AS id,nombre,precio`,[nombre.trim(),importe]);
+  res.json(rows[0]);
+});
+catalogos.patch('/tarifas-estancia/:unidad',async(req,res)=>{
+  if (res.locals.usuario.rol!=='administrador') return res.status(403).json({error:'Se requiere la cuenta administradora.'});
+  if (!precio(req.body?.tarifa_diaria)) return res.status(422).json({error:'Ingresa una tarifa diaria positiva con hasta dos decimales.'});
+  const {rows}=await postgres.query('UPDATE hospital.tarifa_estancia SET tarifa_diaria=$1 WHERE tipo_unidad=$2 RETURNING tipo_unidad,tarifa_diaria',[req.body.tarifa_diaria,req.params.unidad]);
+  if (!rows.length) return res.status(404).json({error:'Unidad desconocida.'});
+  res.json(rows[0]);
 });
 catalogos.post('/habitaciones',async(req,res)=>{
   const {numero,tipo_unidad,piso,capacidad}=req.body||{};

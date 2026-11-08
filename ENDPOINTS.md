@@ -156,6 +156,14 @@ Usa los identificadores devueltos por las consultas. Un conflicto de capacidad o
 
 ## Hospital · cargos, factura y pagos
 
+GET /api/catalogos/procedimientos lista los procedimientos y sus precios. POST en esa misma ruta permite al administrador crear o actualizar por nombre, por ejemplo `{"nombre":"Curación simple","precio":"50.00"}`. En una consulta de Hospital, cada tratamiento cuyo nombre coincide con el catálogo (sin distinguir mayúsculas) conserva su registro clínico y genera un cargo por el precio vigente si el paciente está internado. Los procedimientos de texto libre y los de precio cero quedan solo en el historial. La versión local de la migración 012 incluye el catálogo y la referencia al tratamiento en el cargo.
+
+La versión completa de la migración 012 incluye los honorarios por visita. Si ya aplicaste su primera versión, vuelve a ejecutar el mismo archivo una vez. Al guardar una consulta de un paciente internado se registra en la misma transacción el cargo del médico que atendió, al precio vigente. La tarifa inicial de demostración es Q100 por visita. Un administrador puede cambiarla en Médicos y especialidades o con PATCH /api/catalogos/medicos/:id/tarifa y `{"tarifa_visita":"125.00"}`. Cero permite registrar visitas sin honorario. Las citas y consultas ambulatorias no generan cargos de hospitalización. En POST /api/pacientes/:id/consultas del Hospital, enviar el mismo encabezado Idempotency-Key (UUID) al reintentar devuelve el ID original.
+
+La migración `hospital/012_tarifas_estancia.sql` añade tarifas diarias por unidad. Con volúmenes existentes se aplica después de `011_abonos.sql`. GET /api/catalogos/tarifas-estancia devuelve el catálogo y PATCH /api/catalogos/tarifas-estancia/:unidad recibe `{"tarifa_diaria":"240.00"}` con una cuenta administradora. El ingreso o traslado guarda la tarifa vigente en la nueva estancia. Los tramos iniciados antes de aplicar la migración mantienen su tratamiento anterior.
+
+Al consultar la cuenta, `estancias` detalla cada tramo con su habitación, tarifa, inicio, fin e importe. El importe se calcula por segundos sobre 24 horas y se redondea a centavos por tramo. Se incluye en el acumulado disponible para abonar. Al dar el alta se fija la fecha final y se incluye el importe en la factura. Los precios iniciales del catálogo son ficticios y editables.
+
 Para volúmenes existentes, aplica la migración desde PowerShell antes de iniciar la API:
 
 ```powershell

@@ -1,10 +1,8 @@
 const moneda=valor=>new Intl.NumberFormat('es-GT',{style:'currency',currency:'GTQ'}).format(valor);
-export function mostrarCuenta(cuerpo,paciente,h,api,atender,fecha,abrir,puedeCobrar=true) {
-  const panel=document.createElement('details');
-  panel.innerHTML='<summary></summary><section aria-live="polite"></section>';
-  panel.querySelector('summary').textContent='Ingreso del '+fecha+' · '+h.estado;
-  cuerpo.append(panel);
-  const vista=panel.querySelector('section');
+export function mostrarCuenta(cuerpo,paciente,h,api,atender,puedeCobrar=true) {
+  const vista=document.createElement('section');
+  vista.setAttribute('aria-live','polite');
+  cuerpo.replaceChildren(vista);
   async function cargar() {
     vista.textContent='Consultando cuenta…';
     try {
@@ -26,6 +24,11 @@ export function mostrarCuenta(cuerpo,paciente,h,api,atender,fecha,abrir,puedeCob
         dt.textContent=nombre; dd.textContent=valor; grupo.append(dt,dd); resumen.append(grupo);
       }
       vista.append(resumen);
+      for (const tramo of cuenta.estancias || []) {
+        const fechaLocal=valor=>new Date(valor).toLocaleString('es-GT',{timeZone:'America/Guatemala'});
+        linea('Habitación '+tramo.numero+' · '+fechaLocal(tramo.fecha_inicio)+' — '+
+          (tramo.fecha_fin?fechaLocal(tramo.fecha_fin):'en curso')+' · '+moneda(tramo.tarifa_diaria)+'/día · '+moneda(tramo.importe));
+      }
       if (cuenta.cargos.length) {
         const bloque=document.createElement('div'); bloque.className='tabla-cuenta';
         bloque.innerHTML='<table><caption>Detalle de cargos</caption><thead><tr><th>Concepto</th><th>Cantidad</th><th>Precio</th><th>Importe</th></tr></thead><tbody></tbody></table>';
@@ -86,6 +89,5 @@ export function mostrarCuenta(cuerpo,paciente,h,api,atender,fecha,abrir,puedeCob
       }
     } catch(error) {vista.textContent=error.message;}
   }
-  panel.ontoggle=()=>{if (panel.open) cargar();};
-  panel.open=abrir;
+  return cargar();
 }

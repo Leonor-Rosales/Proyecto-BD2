@@ -6,7 +6,7 @@ const subtotal='round(cantidad * precio_unitario, 2)';
 export async function emitirFactura(db, ingreso) {
   await db.query(`INSERT INTO hospital.factura(id_hospitalizacion,monto_total,estado_pago)
     SELECT $1,total,CASE WHEN total=0 THEN 'pagada' ELSE 'pendiente' END
-    FROM (SELECT coalesce(sum(${subtotal}),0) total FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=$1) s
+    FROM (SELECT coalesce(sum(importe),0) total FROM hospital.importes_ingreso WHERE id_hospitalizacion=$1) s
     ON CONFLICT (id_hospitalizacion) DO NOTHING`,[ingreso]);
   await db.query(`UPDATE hospital.pago p SET id_factura=f.id_factura FROM hospital.factura f
     WHERE f.id_hospitalizacion=$1 AND p.id_hospitalizacion=$1 AND p.id_factura IS NULL`,[ingreso]);
@@ -35,7 +35,8 @@ facturacion.get('/catalogo',async(req,res)=>{
 });
 facturacion.get('/:ingreso/cuenta',async(req,res)=>{
   const {rows}=await postgres.query(`SELECT h.id_hospitalizacion AS id,
-    (SELECT coalesce(sum(${subtotal}),0)::text FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=h.id_hospitalizacion) AS acumulado,
+    (SELECT coalesce(sum(importe),0)::text FROM hospital.importes_ingreso WHERE id_hospitalizacion=h.id_hospitalizacion) AS acumulado,
+    ARRAY(SELECT to_jsonb(e) FROM hospital.cobro_estancia e WHERE e.id_hospitalizacion=h.id_hospitalizacion ORDER BY e.fecha_inicio) AS estancias,
     ARRAY(SELECT jsonb_build_object('id',c.id_cargo::text,'tipo',t.nombre_cargo,'descripcion',c.descripcion,'cantidad',c.cantidad,
       'medicamento',m.nombre_generico,'administrado',c.administrado,'fecha',c.fecha_cargo,'profesional',p.nombres||' '||p.apellidos,
       'precio_unitario',c.precio_unitario,'subtotal',round(c.cantidad*c.precio_unitario,2)) FROM hospital.cargo_hospitalizacion c JOIN hospital.tipo_cargo t USING(id_tipo_cargo)
@@ -97,8 +98,8 @@ async function cobrar(db,h,d,clave,administrado=false) {
   if (!positivo(d.cantidad) || !positivo(d.precio_unitario) || typeof d.descripcion!=='string' || !d.descripcion.trim() ||
       d.descripcion.length>255 || d.descripcion.includes('\u0000')) rechazar(422,'Revisa la descripción, la cantidad y el precio.');
   const total=await db.query(`SELECT round($2::numeric*$3::numeric,2) AS importe,
-    coalesce(sum(${subtotal}),0)+round($2::numeric*$3::numeric,2)<=99999999.99 AS cabe
-    FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=$1`,[h.id,d.cantidad,d.precio_unitario]);
+    coalesce(sum(importe),0)+round($2::numeric*$3::numeric,2)<=99999999.99 AS cabe
+    FROM hospital.importes_ingreso WHERE id_hospitalizacion=$1`,[h.id,d.cantidad,d.precio_unitario]);
   if (!total.rows[0].cabe || Number(total.rows[0].importe)===0) rechazar(422,'El importe está fuera del rango permitido.');
   const {rows}=await db.query(`INSERT INTO hospital.cargo_hospitalizacion
     (id_hospitalizacion,id_tipo_cargo,id_medicamento,id_personal,descripcion,cantidad,precio_unitario,solicitud,administrado)
@@ -123,7 +124,7 @@ async function pagar(db,h,d,clave) {
       (d.referencia!=null && (typeof d.referencia!=='string'||d.referencia.length>100||d.referencia.includes('\u0000')))) rechazar(422,'Revisa monto, método y referencia.');
   if (!f && h.estado!=='internado') rechazar(409,'Emite la factura del ingreso antes de registrar el pago.');
   const saldo=f?.saldo ?? (await db.query(`SELECT
-    (SELECT coalesce(sum(${subtotal}),0) FROM hospital.cargo_hospitalizacion WHERE id_hospitalizacion=$1)
+    (SELECT coalesce(sum(importe),0) FROM hospital.importes_ingreso WHERE id_hospitalizacion=$1)
     -(SELECT coalesce(sum(monto),0) FROM hospital.pago WHERE id_hospitalizacion=$1) AS pendiente`,[h.id])).rows[0].pendiente;
   const {rows}=await db.query(`INSERT INTO hospital.pago(id_factura,monto,metodo_pago,referencia,solicitud,id_hospitalizacion)
     SELECT $1,$2::numeric,$3,$4,$5,$7 WHERE $2::numeric<=$6::numeric RETURNING id_pago AS id`,[f?.id??null,d.monto,d.metodo,d.referencia||null,clave,saldo,h.id]);

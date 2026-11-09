@@ -168,17 +168,26 @@ function mostrarPanel(contenido, api, entidad,rol) {
       agregar('h3', 'Odontograma Clínico (32 piezas dentales fijas)');
       destino = document.createElement('article'); destino.className = 'registro-clinico'; secciones.historial.append(destino);
       const colores = { sano: '#10b981', caries: '#ef4444', obturado: '#3b82f6', ausente: '#6b7280', corona: '#f59e0b', endodoncia: '#8b5cf6' };
-      destino.innerHTML = `
-        <div style="display:grid; grid-template-columns:repeat(8, 1fr); gap:6px; margin:10px 0; font-size:12px; text-align:center;">
-          ${odontograma.map(p => `
-            <div style="border:1px solid #ddd; padding:4px; border-radius:4px; background:${colores[p.estado] || '#eee'}18; border-color:${colores[p.estado] || '#ccc'};">
-              <strong>${p.numero}</strong><br>
-              <span style="font-weight:600; color:${colores[p.estado] || '#333'}">${p.estado}</span>
-              ${p.observaciones ? `<br><small style="color:#666">${p.observaciones}</small>` : ''}
-            </div>
-          `).join('')}
-        </div>
-      `;
+      const rejilla=document.createElement('div');
+      rejilla.style.cssText='display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:10px 0;font-size:12px;text-align:center';
+      destino.append(rejilla);
+      for (const pieza of odontograma) {
+        const celda=document.createElement('div');
+        const color=Object.hasOwn(colores,pieza.estado)?colores[pieza.estado]:'#64748b';
+        celda.style.cssText='border:1px solid '+color+';padding:4px;border-radius:4px;background:'+color+'18';
+        const numero=document.createElement('strong');
+        numero.textContent=pieza.numero;
+        const estado=document.createElement('span');
+        estado.textContent=pieza.estado;
+        estado.style.color=color;
+        celda.append(numero,document.createElement('br'),estado);
+        if (pieza.observaciones) {
+          const nota=document.createElement('small');
+          nota.textContent=pieza.observaciones;
+          celda.append(document.createElement('br'),nota);
+        }
+        rejilla.append(celda);
+      }
       if (cobros?.length) {
         destino = secciones.historial;
         agregar('h3', 'Historial de Cobros (' + cobros.length + ')');

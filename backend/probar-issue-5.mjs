@@ -208,16 +208,20 @@ const ped1Antes = await solicitar('josuePediatria', '/pacientes/1/datos', 200);
 const telHospOriginal = hosp1Antes.telefono;
 const nuevoTelPedAislado = '5557-9999';
 
-// Editar teléfono en Pediatría
-await solicitar('josuePediatria', '/pacientes/1', 200, 'PATCH', { telefono: nuevoTelPedAislado });
+try {
+  // Editar teléfono en Pediatría
+  await solicitar('josuePediatria', '/pacientes/1', 200, 'PATCH', { telefono: nuevoTelPedAislado });
 
-// Verificar que Hospital ID '1' NO fue modificado
-const hosp1Despues = await solicitar('mariaHospital', '/pacientes/1/datos', 200);
-assert.equal(hosp1Despues.telefono, telHospOriginal, 'Editar en Pediatría NO debe modificar Hospital');
+  // Verificar que Hospital ID '1' NO fue modificado
+  const hosp1Despues = await solicitar('mariaHospital', '/pacientes/1/datos', 200);
+  assert.equal(hosp1Despues.telefono, telHospOriginal, 'Editar en Pediatría NO debe modificar Hospital');
 
-// Verificar que Pediatría ID '1' SÍ fue modificado
-const ped1Despues = await solicitar('josuePediatria', '/pacientes/1/datos', 200);
-assert.equal(ped1Despues.telefono, nuevoTelPedAislado, 'Pediatría debe reflejar el nuevo teléfono');
+  // Verificar que Pediatría ID '1' SÍ fue modificado
+  const ped1Despues = await solicitar('josuePediatria', '/pacientes/1/datos', 200);
+  assert.equal(ped1Despues.telefono, nuevoTelPedAislado, 'Pediatría debe reflejar el nuevo teléfono');
+} finally {
+  await solicitar('josuePediatria', '/pacientes/1', 200, 'PATCH', { telefono: ped1Antes.telefono });
+}
 console.log('Aislamiento entre instituciones confirmado: editar paciente 1 en Pediatría no tocó paciente 1 en Hospital.');
 
 console.log('--- 6. No Regresión ---');

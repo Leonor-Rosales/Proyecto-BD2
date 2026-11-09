@@ -10,7 +10,7 @@ export function crearExpediente(raiz, paciente, entidad, inicial) {
   } else if (entidad === 'laboratorio') {
     opciones = [['historial', 'Resultados de exámenes'], ['examen', 'Registrar examen'], ['datos', 'Datos del paciente'], ['consultas', 'Atenciones anteriores'], ['atencion', 'Registrar atención']];
   } else {
-    opciones = [['historial', 'Historial clínico'], ['atencion', 'Registrar atención']];
+    opciones = [['historial', 'Historial clínico'], ['atencion', 'Registrar atención'], ['datos', 'Datos del paciente']];
   }
   const secciones = {};
   const botones = {};

@@ -262,10 +262,16 @@ function mostrarPanel(contenido, api, entidad,rol) {
     const formulario = resultado.querySelector('.consulta');
     const actualizar = () => { if (actual === version) abrir(paciente.id,resultado.dataset.seccion); };
     await mostrarDatos(secciones.datos,paciente.id,api,atender,actualizar,entidad);
-    if (paciente.estado==='baja' && entidad==='laboratorio') {
-      secciones.atencion.innerHTML='<h2>Expediente archivado</h2><p>Consulta los registros en Atenciones anteriores.</p>';
-      secciones.examen.innerHTML='<h2>Expediente archivado</h2><p>Los estudios anteriores permanecen disponibles en Resultados de exámenes.</p>';
-      return;
+    if (paciente.estado === 'baja') {
+      if (entidad === 'laboratorio') {
+        secciones.atencion.innerHTML = '<h2>Expediente archivado</h2><p>Consulta los registros en Atenciones anteriores.</p>';
+        secciones.examen.innerHTML = '<h2>Expediente archivado</h2><p>Los estudios anteriores permanecen disponibles en Resultados de exámenes.</p>';
+        return;
+      }
+      if (['pediatria', 'odontologia'].includes(entidad)) {
+        secciones.atencion.innerHTML = '<h2>Expediente archivado</h2><p>Este paciente se encuentra de baja administrativa. Consulta los registros en el historial clínico.</p>';
+        return;
+      }
     }
     if (entidad==='hospital') {
       const catalogo=await api.catalogos('procedimientos');

@@ -31,9 +31,12 @@ export function leerConsulta(body, hospital) {
       if (!['presuntivo', 'definitivo'].includes(d?.tipo)) invalido('Tipo de diagnóstico inválido.');
       return { codigo_cie: texto(d.codigo_cie, 'codigo_cie', 10), descripcion: texto(d.descripcion, 'descripcion', 255), tipo: d.tipo };
     }),
-    tratamientos: lista(datos.tratamientos, 'tratamientos').map(t => ({
-      nombre_procedimiento: texto(t?.nombre_procedimiento, 'nombre_procedimiento', 150)
-    })),
+    tratamientos: lista(datos.tratamientos, 'tratamientos').map(t => {
+      const item = { nombre_procedimiento: texto(t?.nombre_procedimiento, 'nombre_procedimiento', 150) };
+      if (t?.pieza != null && !isNaN(Number(t.pieza))) item.pieza = Number(t.pieza);
+      if (t?.nuevo_estado) item.nuevo_estado = texto(String(t.nuevo_estado), 'nuevo_estado', 50);
+      return item;
+    }),
     recetas: lista(datos.recetas, 'recetas').map(r => {
       const medicamentos = lista(r?.medicamentos, 'medicamentos').map(m => ({
         medicamento: texto(m?.medicamento, 'medicamento', 150), dosis: texto(m?.dosis, 'dosis', 50),

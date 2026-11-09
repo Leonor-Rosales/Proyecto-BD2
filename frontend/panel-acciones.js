@@ -1,4 +1,3 @@
-// Alterna vistas sin recrear los formularios ni perder lo que ya se escribió.
 export function selectorPanel(etiqueta, opciones, seleccionar, inicial) {
   const control=document.createElement('label');
   control.className='selector-panel';

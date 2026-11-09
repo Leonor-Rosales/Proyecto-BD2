@@ -72,7 +72,6 @@ export function cargarAmbulatorio({secciones,seleccionar,formulario, paciente, a
     if (!elegida) { cita.reset(); return; }
     cita.elements.id_personal.value=elegida.id_personal;
     cita.elements.motivo.value=elegida.motivo || '';
-    // El control datetime-local representa la hora civil de Guatemala (UTC-06).
     cita.elements.fecha.value=new Date(new Date(elegida.fecha).getTime()-6*3600000).toISOString().slice(0,16);
   };
   atender(cita,async ({cita:seleccion,...datos}) => { await api.guardarCita(paciente.id,seleccion,datos); actualizar(); });

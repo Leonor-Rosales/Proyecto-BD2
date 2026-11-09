@@ -2,6 +2,10 @@
 
 Proyecto academico para la integracion de multiples motores de bases de datos relacionales (SQL) y no relacionales (NoSQL) en una red asistencial interconectada.
 
+### Integrantes del Proyecto
+* **Maria Leonor Rosales Gutierrez** - 1560124
+* **Josue André Menéndez Juárez** - 1511124
+
 El sistema unifica el acceso a cuatro instituciones medicas independientes a traves de una unica interfaz web y una API centralizada, garantizando el aislamiento de datos, la seguridad en base a roles y la atomicidad de las operaciones clinicas y administrativas.
 
 ---
@@ -136,9 +140,7 @@ Proyecto-BD2/
 |   |-- server.js                        # Configuracion de Express, middleware de auth y roles
 |   |-- tipos-examen.js                  # Esquemas y campos de examenes de laboratorio
 |   |-- probar.mjs                       # Pruebas basicas de conectividad y autenticacion
-|   |-- probar-frontend-components.mjs   # Pruebas automatizadas de renderizado de componentes
 |   |-- probar-integridad-hospital.mjs   # Verificacion de unicidad y rollback transaccional en Postgres
-|   |-- probar-issue-5.mjs               # Suite integral de flujos clinicos y de secretaria
 |   |-- probar-roles-laboratorio.mjs     # Suite de permisos y examenes de laboratorio en Mongo
 |   `-- package.json                     # Dependencias del backend (pg, mysql2, mongodb, firestore)
 |
@@ -205,10 +207,4 @@ node --env-file=.env backend/probar-integridad-hospital.mjs
 
 # Prueba de roles, validaciones y estudios en MongoDB (Laboratorio)
 node --env-file=.env backend/probar-roles-laboratorio.mjs
-
-# Prueba integral de atencion clinica, secretaria y aislamiento (Pediatria y Odontologia)
-node --env-file=.env backend/probar-issue-5.mjs
-
-# Prueba de renderizado de componentes DOM del frontend
-node backend/probar-frontend-components.mjs
 ```

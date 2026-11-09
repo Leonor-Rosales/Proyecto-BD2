@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { altaHospital, consultaHospital, historialHospital, postgres } from './repositorios.js';
 
-// Ejecutar desde la raíz: node --env-file=.env backend/probar-integridad-hospital.mjs
-// Cada ejecución conserva un paciente ficticio con su historial vacío como evidencia.
 try {
   const id = await altaHospital({
     nombres: 'Prueba de integridad', apellidos: 'Hospital', fecha_nacimiento: '2000-01-01'

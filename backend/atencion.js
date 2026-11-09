@@ -21,7 +21,7 @@ function objeto(valor, campo) {
   return valor;
 }
 
-export function leerConsulta(body, hospital) {
+export function leerConsulta(body, entidad) {
   const datos = objeto(body, 'consulta');
   const consulta = {
     motivo: texto(datos.motivo, 'motivo', 4000),
@@ -31,9 +31,20 @@ export function leerConsulta(body, hospital) {
       if (!['presuntivo', 'definitivo'].includes(d?.tipo)) invalido('Tipo de diagnóstico inválido.');
       return { codigo_cie: texto(d.codigo_cie, 'codigo_cie', 10), descripcion: texto(d.descripcion, 'descripcion', 255), tipo: d.tipo };
     }),
-    tratamientos: lista(datos.tratamientos, 'tratamientos').map(t => ({
-      nombre_procedimiento: texto(t?.nombre_procedimiento, 'nombre_procedimiento', 150)
-    })),
+    tratamientos: lista(datos.tratamientos, 'tratamientos').map(t => {
+      const item = { nombre_procedimiento: texto(t?.nombre_procedimiento, 'nombre_procedimiento', 150) };
+      if (entidad === 'odontologia' && (t.pieza != null || t.nuevo_estado != null)) {
+        if (!['string','number'].includes(typeof t.pieza) || !/^[1-4][1-8]$/.test(String(t.pieza))) {
+          invalido('Selecciona una pieza válida del odontograma.');
+        }
+        item.pieza = Number(t.pieza);
+        if (t.nuevo_estado != null) {
+          if (!['sano','caries','obturado','ausente','corona','endodoncia'].includes(t.nuevo_estado)) invalido('Estado dental inválido.');
+          item.nuevo_estado = t.nuevo_estado;
+        }
+      }
+      return item;
+    }),
     recetas: lista(datos.recetas, 'recetas').map(r => {
       const medicamentos = lista(r?.medicamentos, 'medicamentos').map(m => ({
         medicamento: texto(m?.medicamento, 'medicamento', 150), dosis: texto(m?.dosis, 'dosis', 50),
@@ -57,8 +68,8 @@ export function leerConsulta(body, hospital) {
       };
     }
   }
-  if (hospital) consulta.id_personal = texto(String(datos.id_personal ?? ''), 'id_personal', 19);
-  if (hospital && datos.id_cita != null) consulta.id_cita = texto(String(datos.id_cita), 'id_cita', 19);
+  if (['hospital','pediatria','odontologia'].includes(entidad)) consulta.id_personal = texto(String(datos.id_personal ?? ''), 'id_personal', 19);
+  if (['hospital','pediatria','odontologia'].includes(entidad) && datos.id_cita != null) consulta.id_cita = texto(String(datos.id_cita), 'id_cita', 19);
   return consulta;
 }
 

@@ -145,7 +145,7 @@ app.get('/api/medicos', async (_req, res) => {
   res.json(await medicos());
 });
 app.post('/api/pacientes/:id/consultas', express.json({ limit: '32kb' }), async (req, res) => {
-  const datos = leerConsulta(req.body, ['hospital', 'pediatria', 'odontologia'].includes(res.locals.entidad));
+  const datos = leerConsulta(req.body, res.locals.entidad);
   const solicitud=res.locals.entidad==='hospital' ? req.get('Idempotency-Key') : undefined;
   if (solicitud!==undefined && !/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(solicitud)) {
     return res.status(422).json({error:'La clave de la consulta debe ser UUID.'});

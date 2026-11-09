@@ -52,7 +52,6 @@ function movimiento(tipo) {
       if (tipo!=='ingreso' && (!activo?.id_estancia || activo.id!==req.params.ingreso)) fallo(409,'La hospitalización ya no está activa.');
       if (tipo==='traslado' && activo.id_habitacion===destino) fallo(409,'Elige una habitación distinta.');
       const habitaciones=[activo?.id_habitacion,tipo==='alta'?null:destino].filter(Boolean);
-      // Orden estable para que dos traslados en sentidos opuestos bloqueen las habitaciones igual.
       await db.query(`SELECT id_habitacion FROM hospital.habitacion WHERE id_habitacion::text=ANY($1::text[])
         ORDER BY id_habitacion FOR UPDATE`,[habitaciones]);
       if (tipo!=='alta') {

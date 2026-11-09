@@ -7,6 +7,13 @@ export const camposPaciente = `<fieldset><legend>Identificación y contacto</leg
   <label>Contacto de emergencia<input name="contacto_emergencia_nombre" maxlength="150"></label>
   <label>Teléfono de emergencia<input name="contacto_emergencia_telefono" maxlength="20"></label></fieldset>`;
 
+const confirmacionesArchivo = {
+  hospital: '¿Archivar el expediente y cancelar sus citas pendientes?',
+  laboratorio: '¿Archivar el expediente del Laboratorio conservando sus resultados?',
+  pediatria: '¿Archivar el expediente de Pediatría conservando sus controles y vacunas?',
+  odontologia: '¿Archivar el expediente de Odontología conservando su historial y tratamientos?'
+};
+
 export async function mostrarDatos(panel,id,api,atender,actualizar,entidad='hospital') {
   const p=await api.datosPaciente(id);
   panel.innerHTML=`<h2>Datos del paciente</h2><p class="estado-paciente"></p>
@@ -21,19 +28,20 @@ export async function mostrarDatos(panel,id,api,atender,actualizar,entidad='hosp
   atender(form,async d=>{await api.editarPaciente(id,d); actualizar();});
   const archivo=panel.querySelector('.archivo');
   if (archivo) atender(archivo,async d=>{
-    if (!confirm(entidad==='hospital'?'¿Archivar el expediente y cancelar sus citas pendientes?':'¿Archivar el expediente del Laboratorio conservando sus resultados?')) return;
+    const mensajeConfirm = confirmacionesArchivo[entidad] || '¿Confirmas que deseas dar de baja y archivar este expediente clínico?';
+    if (!confirm(mensajeConfirm)) return;
     await api.archivarPaciente(id,d); actualizar();
   });
 }
 
 export async function mostrarSecretaria(raiz,id,api,atender,actualizar,entidad='hospital') {
-  if (entidad==='laboratorio') {
+  if (entidad !== 'hospital') {
     raiz.innerHTML='<p>Gestión administrativa · Identificación, contacto y archivo del expediente.</p><section class="datos"></section>';
     await mostrarDatos(raiz.querySelector('.datos'),id,api,atender,actualizar,entidad);
     return;
   }
   raiz.innerHTML='<section class="datos"></section><section class="agenda-secretaria"><h2>Citas del paciente</h2><ul></ul><h3>Agendar cita</h3><form><label>Médico<select name="id_personal" required></select></label><label>Fecha y hora de Guatemala<input name="fecha" type="datetime-local" step="1800" required></label><label>Motivo de reserva<input name="motivo" required maxlength="255"></label><button>Agendar cita</button><p class="mensaje" role="status"></p></form></section>';
-  await mostrarDatos(raiz.querySelector('.datos'),id,api,atender,actualizar);
+  await mostrarDatos(raiz.querySelector('.datos'),id,api,atender,actualizar,entidad);
   const [citas,medicos]=await Promise.all([api.citasPaciente(id),api.medicos()]);
   const form=raiz.querySelector('.agenda-secretaria form');
   form.insertAdjacentHTML('afterbegin','<label>Cita<select name="cita"><option value="">Nueva cita</option></select></label>');

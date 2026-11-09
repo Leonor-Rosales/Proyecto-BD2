@@ -540,10 +540,6 @@ export async function archivarLaboratorio(id, motivo) {
   return { estado: 'baja' };
 }
 
-// =====================================================================
-// Adaptador NoSQL Firestore: Clínica Odontológica
-// =====================================================================
-
 export function generarOdontogramaInicial() {
   const piezas = [
     18, 17, 16, 15, 14, 13, 12, 11,
@@ -720,7 +716,6 @@ export async function inicializarOdontologia() {
     if (snap.empty) {
       const demoId = 'ODO-001';
       const odontograma = generarOdontogramaInicial();
-      // Marcamos un par de piezas dentales para mostrar variedad
       odontograma[0] = { numero: 18, estado: 'ausente', observaciones: 'Tercer molar extraído' };
       odontograma[3] = { numero: 15, estado: 'obturado', observaciones: 'Resina oclusal' };
       odontograma[12] = { numero: 25, estado: 'caries', observaciones: 'Caries interproximal leve' };
@@ -766,7 +761,5 @@ export async function inicializarOdontologia() {
       });
       console.log('Clínica Odontológica inicializada con paciente demo ODO-001 en Firestore.');
     }
-  } catch (err) {
-    // Si el emulador aún no está encendido al importar, se ignorará y reintentará al hacer la primera petición
-  }
+  } catch (err) {}
 }

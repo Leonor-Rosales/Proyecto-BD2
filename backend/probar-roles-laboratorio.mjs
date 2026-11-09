@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 
-// Prueba de integración local. Crea un paciente ficticio y lo deja archivado.
 const cuentas = {
   secretaria: ['secretaria.laboratorio', process.env.API_SECRETARIA_LAB_PASSWORD],
   laboratorista: ['laboratorista.laboratorio', process.env.API_LABORATORISTA_PASSWORD],

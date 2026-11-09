@@ -1,5 +1,5 @@
 import express from 'express';
-import { postgres, mongo } from './repositorios.js';
+import { postgres, mongo, mysqlPediatria, firestoreOdontologia } from './repositorios.js';
 
 const limites = {
   nombres:100, apellidos:100, dpi_cui:20, genero:20, direccion:255, telefono:20,
@@ -43,6 +43,48 @@ pacientes.get('/:id/datos',async(req,res)=>{
     const proyeccion=Object.fromEntries([...Object.keys(limites),'fecha_nacimiento','estado','motivo_baja','fecha_baja'].map(k=>[k,1]));
     const documento=await mongo.db('laboratorio_clinico').collection('pacientes').findOne({_id:req.params.id},{projection:proyeccion});
     if (documento) {const {_id,...resto}=documento;datos={...resto,id:_id,estado:documento.estado||'activo'};}
+  } else if (res.locals.entidad==='pediatria') {
+    if (/^[1-9]\d{0,18}$/.test(req.params.id)) {
+      const [rows]=await mysqlPediatria.execute(
+        `SELECT CAST(id_paciente AS CHAR) AS id, nombres, apellidos, dpi_cui,
+          DATE_FORMAT(fecha_nacimiento, '%Y-%m-%d') AS fecha_nacimiento,
+          genero, direccion, telefono, correo_electronico,
+          contacto_emergencia_nombre, contacto_emergencia_telefono,
+          estado, motivo_baja, fecha_baja
+        FROM paciente WHERE id_paciente = ?`,
+        [req.params.id]
+      );
+      if (rows[0]) {
+        datos={
+          ...rows[0],
+          id:String(rows[0].id),
+          estado:rows[0].estado||'activo',
+          fecha_baja:rows[0].fecha_baja instanceof Date ? rows[0].fecha_baja.toISOString() : (rows[0].fecha_baja || null)
+        };
+      }
+    }
+  } else if (res.locals.entidad==='odontologia') {
+    const docRef=firestoreOdontologia.collection('pacientes').doc(req.params.id);
+    const snap=await docRef.get();
+    if (snap.exists) {
+      const p=snap.data();
+      datos={
+        id:snap.id,
+        nombres:p.nombres||null,
+        apellidos:p.apellidos||null,
+        dpi_cui:p.dpi_cui||null,
+        fecha_nacimiento:p.fecha_nacimiento||null,
+        genero:p.genero||null,
+        direccion:p.direccion||null,
+        telefono:p.telefono||null,
+        correo_electronico:p.correo_electronico||null,
+        contacto_emergencia_nombre:p.contacto_emergencia_nombre||null,
+        contacto_emergencia_telefono:p.contacto_emergencia_telefono||null,
+        estado:p.estado||'activo',
+        motivo_baja:p.motivo_baja||null,
+        fecha_baja:p.fecha_baja?.toDate ? p.fecha_baja.toDate().toISOString() : (p.fecha_baja || null)
+      };
+    }
   } else datos=await datosPaciente(req.params.id);
   if (!datos) return res.status(404).json({error:'Paciente no encontrado.'});
   res.json(datos);
@@ -61,6 +103,23 @@ pacientes.patch('/:id',async(req,res)=>{
   if (res.locals.entidad==='laboratorio') {
     const cambio=await mongo.db('laboratorio_clinico').collection('pacientes').updateOne({_id:req.params.id},{$set:datos});
     if (!cambio.matchedCount) return res.status(404).json({error:'Paciente no encontrado.'});
+    return res.json({id:req.params.id});
+  }
+  if (res.locals.entidad==='pediatria') {
+    if (!/^[1-9]\d{0,18}$/.test(req.params.id)) return res.status(404).json({error:'Paciente no encontrado.'});
+    const [pacientes]=await mysqlPediatria.execute('SELECT id_paciente FROM paciente WHERE id_paciente = ?',[req.params.id]);
+    if (!pacientes.length) return res.status(404).json({error:'Paciente no encontrado.'});
+    await mysqlPediatria.execute(
+      `UPDATE paciente SET ${campos.map(c=>c+' = ?').join(', ')} WHERE id_paciente = ?`,
+      [...Object.values(datos),req.params.id]
+    );
+    return res.json({id:String(pacientes[0].id_paciente)});
+  }
+  if (res.locals.entidad==='odontologia') {
+    const docRef=firestoreOdontologia.collection('pacientes').doc(req.params.id);
+    const snap=await docRef.get();
+    if (!snap.exists) return res.status(404).json({error:'Paciente no encontrado.'});
+    await docRef.update(datos);
     return res.json({id:req.params.id});
   }
   const {rows}=await postgres.query(`UPDATE hospital.paciente SET ${campos.map((c,i)=>c+'=$'+(i+2)).join(',')}

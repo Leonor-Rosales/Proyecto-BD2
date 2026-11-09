@@ -617,12 +617,6 @@ export async function medicosOdontologia() {
 
 export async function consultaOdontologia(id, atencion) {
   const docRef = firestoreOdontologia.collection('pacientes').doc(id);
-  const snap = await docRef.get();
-  if (!snap.exists) return null;
-  const p = snap.data();
-  if (p.estado !== 'activo') {
-    throw Object.assign(new Error('El paciente no está activo.'), { status: 422 });
-  }
 
   const consulta = {
     motivo: atencion.motivo,
@@ -639,6 +633,9 @@ export async function consultaOdontologia(id, atencion) {
     const freshSnap = await t.get(docRef);
     if (!freshSnap.exists) return null;
     const freshData = freshSnap.data();
+    if (freshData.estado !== 'activo') {
+      throw Object.assign(new Error('El paciente no está activo.'), { status: 422 });
+    }
 
     let nuevoOdontograma = freshData.odontograma || generarOdontogramaInicial();
     if (atencion.tratamientos?.length) {

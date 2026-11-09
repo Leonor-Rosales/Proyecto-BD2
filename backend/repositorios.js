@@ -94,7 +94,7 @@ export async function historialLaboratorio(id) {
 
 export async function medicosHospital() {
   const { rows } = await postgres.query(`
-    SELECT id_personal::text AS id, nombres, apellidos, nombre_especialidad AS especialidad FROM hospital.personal_medico
+    SELECT id_personal::text AS id, nombres, apellidos, nombre_especialidad AS especialidad, tarifa_visita FROM hospital.personal_medico
     LEFT JOIN hospital.especialidad USING(id_especialidad)
     WHERE estado = 'activo' AND rol IN ('medico','especialista') ORDER BY apellidos, nombres`);
   return rows;
@@ -119,11 +119,20 @@ export async function buscarLaboratorio(termino) {
   ]).toArray();
 }
 
-export async function consultaHospital(id, atencion) {
+export async function consultaHospital(id, atencion, solicitud = null) {
   const cliente = await postgres.connect();
   try {
     await cliente.query('BEGIN');
     await cliente.query('SELECT id_paciente FROM hospital.paciente WHERE id_paciente::text=$1 FOR UPDATE',[id]);
+    if (solicitud) {
+      const previa=await cliente.query(`SELECT c.id_consulta FROM hospital.consulta_medica c
+        JOIN hospital.historial_clinico h USING(id_historial)
+        WHERE h.id_paciente::text=$1 AND c.solicitud=$2`,[id,solicitud]);
+      if (previa.rowCount) {
+        await cliente.query('COMMIT');
+        return previa.rows[0].id_consulta;
+      }
+    }
     if (atencion.id_cita) {
       const cita = await cliente.query(`UPDATE hospital.cita_medica SET estado_cita='atendida'
         WHERE id_cita::text=$1 AND id_paciente::text=$2 AND id_personal::text=$3 AND estado_cita='programada'`,
@@ -131,21 +140,40 @@ export async function consultaHospital(id, atencion) {
       if (!cita.rowCount) throw Object.assign(new Error('La cita ya no está disponible para este paciente y médico.'), { status: 409 });
     }
     const { rows } = await cliente.query(`
-      INSERT INTO hospital.consulta_medica (id_historial,id_personal,motivo_consulta,notas_evolucion,signos_vitales,id_cita)
-      SELECT h.id_historial,m.id_personal,$3,$4,$5,$6 FROM hospital.historial_clinico h
+      INSERT INTO hospital.consulta_medica (id_historial,id_personal,motivo_consulta,notas_evolucion,signos_vitales,id_cita,solicitud)
+      SELECT h.id_historial,m.id_personal,$3,$4,$5,$6,$7 FROM hospital.historial_clinico h
       JOIN hospital.paciente p USING (id_paciente)
       JOIN hospital.personal_medico m ON m.id_institucion=p.id_institucion
       WHERE p.id_paciente::text=$1 AND p.estado='activo' AND m.id_personal::text=$2
         AND m.estado='activo' AND m.rol IN ('medico','especialista')
-      RETURNING id_consulta AS id`, [id, atencion.id_personal, atencion.motivo, atencion.notas, atencion.signos_vitales, atencion.id_cita]);
+      RETURNING id_consulta AS id`, [id, atencion.id_personal, atencion.motivo, atencion.notas, atencion.signos_vitales, atencion.id_cita, solicitud]);
     if (!rows.length) throw Object.assign(new Error('Verifica el paciente y el médico activo.'), { status: 422 });
     const consulta = rows[0].id;
+    await cliente.query(`INSERT INTO hospital.cargo_hospitalizacion
+      (id_hospitalizacion,id_tipo_cargo,id_personal,id_consulta,descripcion,cantidad,precio_unitario)
+      SELECT h.id_hospitalizacion,t.id_tipo_cargo,m.id_personal,c.id_consulta,
+        'Visita médica · consulta ' || c.id_consulta,1,m.tarifa_visita
+      FROM hospital.consulta_medica c JOIN hospital.personal_medico m USING(id_personal)
+      JOIN hospital.hospitalizacion h ON h.id_historial=c.id_historial AND h.estado='internado'
+      JOIN hospital.tipo_cargo t ON t.nombre_cargo='honorario_medico'
+      WHERE c.id_consulta=$1 AND m.tarifa_visita>0`,[consulta]);
     for (const d of atencion.diagnosticos) {
       await cliente.query('INSERT INTO hospital.diagnostico (id_consulta,codigo_cie,descripcion,tipo) VALUES ($1,$2,$3,$4)',
         [consulta, d.codigo_cie, d.descripcion, d.tipo]);
     }
     for (const t of atencion.tratamientos) {
-      await cliente.query('INSERT INTO hospital.tratamiento_procedimiento (id_consulta,nombre_procedimiento,fecha_realizacion) VALUES ($1,$2,CURRENT_DATE)',
+      await cliente.query(`WITH realizado AS (
+        INSERT INTO hospital.tratamiento_procedimiento (id_consulta,nombre_procedimiento,fecha_realizacion)
+        VALUES ($1,$2,CURRENT_DATE) RETURNING id_tratamiento,id_consulta,nombre_procedimiento
+      )
+      INSERT INTO hospital.cargo_hospitalizacion
+        (id_hospitalizacion,id_tipo_cargo,id_tratamiento,descripcion,cantidad,precio_unitario)
+      SELECT h.id_hospitalizacion,t.id_tipo_cargo,r.id_tratamiento,p.nombre,1,p.precio
+      FROM realizado r JOIN hospital.consulta_medica c USING(id_consulta)
+      JOIN hospital.hospitalizacion h ON h.id_historial=c.id_historial AND h.estado='internado'
+      JOIN hospital.procedimiento_catalogo p ON lower(p.nombre)=lower(r.nombre_procedimiento)
+      JOIN hospital.tipo_cargo t ON t.nombre_cargo='servicio'
+      WHERE p.precio>0`,
         [consulta, t.nombre_procedimiento]);
     }
     for (const r of atencion.recetas) {
@@ -500,12 +528,15 @@ export async function archivarPediatria(id, motivo) {
 }
 
 export async function archivarLaboratorio(id, motivo) {
-  const db = mongo.db('laboratorio_clinico');
-  const res = await db.collection('pacientes').updateOne(
-    { _id: id },
+  const pacientes = mongo.db('laboratorio_clinico').collection('pacientes');
+  const cambio = await pacientes.updateOne(
+    { _id: id, estado: { $ne: 'baja' } },
     { $set: { estado: 'baja', motivo_baja: motivo.trim(), fecha_baja: new Date() } }
   );
-  if (!res.matchedCount) return null;
+  if (!cambio.matchedCount) {
+    const archivado = await pacientes.findOne({ _id: id, estado: 'baja' }, { projection: { _id: 1 } });
+    if (!archivado) return null;
+  }
   return { estado: 'baja' };
 }
 

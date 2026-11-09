@@ -1,9 +1,11 @@
 import { mostrarCuenta } from './facturacion.js';
+import { selectorPanel } from './panel-acciones.js';
 export async function mostrarInternamiento({secciones,paciente,api,atender,actualizar,rol}) {
   const cuerpo=secciones.internamiento;
   const [ingresos,habitaciones]=await Promise.all([api.internamientos(paciente.id),api.habitaciones(paciente.id)]);
   const activo=ingresos.find(h=>h.estado==='internado');
   const actual=activo?.estancias.find(e=>!e.fin);
+  let refrescarCuenta;
   const indicador=document.createElement('h3');
   indicador.textContent=activo?'Paciente internado · Habitación '+(actual?.habitacion || 'sin asignar'):'Ingreso hospitalario';
   cuerpo.append(indicador);
@@ -45,8 +47,7 @@ export async function mostrarInternamiento({secciones,paciente,api,atender,actua
       const cargo=await api.registrarImporte(paciente.id,activo.id,'administraciones',datos,clave);
       clave=crypto.randomUUID();
       admin.querySelector('.mensaje').textContent='Administración registrada. Cargo '+cargo.id+' agregado a la cuenta.';
-      // La cuenta vuelve a consultar los cargos cuando se abre después de administrar.
-      for (const detalle of secciones.cuenta.querySelectorAll('details')) detalle.open=false;
+      if (refrescarCuenta) await refrescarCuenta();
     });
     cuerpo.insertAdjacentHTML('beforeend','<form class="alta-hospitalaria"><button>Dar alta hospitalaria</button><p class="mensaje" role="status"></p></form>');
     atender(cuerpo.querySelector('.alta-hospitalaria'),async ()=>{
@@ -59,6 +60,8 @@ export async function mostrarInternamiento({secciones,paciente,api,atender,actua
   if (!ingresos.length) {
     const aviso=document.createElement('p'); aviso.textContent='El paciente aún no tiene hospitalizaciones con una cuenta asociada.'; secciones.cuenta.append(aviso);
   }
+  const historial=document.createElement('section');
+  cuerpo.append(historial);
   for (const h of ingresos) {
     const titulo=document.createElement('h4');
     titulo.textContent='Ingreso del '+horario(h.fecha_ingreso)+' · '+h.estado;
@@ -70,7 +73,24 @@ export async function mostrarInternamiento({secciones,paciente,api,atender,actua
       item.textContent=e.habitacion+' · '+e.unidad+' · '+horario(e.inicio)+' → '+(e.fin?horario(e.fin):'Estancia actual');
       lista.append(item);
     }
-    cuerpo.append(titulo,motivo,lista);
-    mostrarCuenta(secciones.cuenta,paciente,h,api,atender,horario(h.fecha_ingreso),ingresos.length===1,rol==='administrador');
+    historial.append(titulo,motivo,lista);
+  }
+  const acciones=[[form,activo?'Trasladar paciente':'Ingresar paciente']];
+  if (activo) acciones.unshift([cuerpo.querySelector('.administrar'),'Administrar medicamento']);
+  if (ingresos.length) acciones.push([historial,'Ver estancias']);
+  if (activo) acciones.push([cuerpo.querySelector('.alta-hospitalaria'),'Dar alta hospitalaria']);
+  if (acciones.length>1) {
+    indicador.after(selectorPanel('Acción de hospitalización',acciones.map(([el,nombre])=>[nombre,nombre]),elegida=>{
+      for (const [el,nombre] of acciones) el.hidden=nombre!==elegida;
+    }));
+  }
+  if (ingresos.length) {
+    const cuenta=document.createElement('div');
+    secciones.cuenta.append(cuenta);
+    cuenta.before(selectorPanel('Cuenta del ingreso',ingresos.map(h=>[String(h.id),horario(h.fecha_ingreso)+' · '+h.estado]),id=>{
+      const ingreso=ingresos.find(h=>String(h.id)===id);
+      refrescarCuenta=()=>mostrarCuenta(cuenta,paciente,ingreso,api,atender,rol==='administrador');
+      refrescarCuenta();
+    },activo && String(activo.id)));
   }
 }
